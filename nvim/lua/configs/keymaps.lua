@@ -135,3 +135,6 @@ map('n', L 'b', C 'FzfLua builtin', 'Show FzfLua bultin')
 -- plugin:opencode
 map({ 'n', 't' }, '<C-,>', C "lua require('opencode').toggle()", 'Toggle opencode')
 map({ 'n', 't', 'v' }, '<C-g>', C "lua require('opencode').ask('@this: ', { submit = true })", 'Ask opencode')
+
+-- plugin:zenmode
+map('n', '<C-t>', C "lua require('zen-mode').toggle()", 'Toggle zenmode')

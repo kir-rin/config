@@ -25,6 +25,8 @@ vim.pack.add({
 	{ name = 'opencode', src = 'https://github.com/NickvanDyke/opencode.nvim' },
 
 	{ name = 'winsep', src = 'https://github.com/nvim-zh/colorful-winsep.nvim' },
+
+	{ name = 'zenmode', src = 'https://github.com/folke/zen-mode.nvim' },
 })
 require('mini.starter').setup({header = '🦒'})
 require('smear_cursor').setup({})
@@ -62,6 +64,7 @@ vim.g.opencode_opts = {
 				width = 0.4,
 			},
 		},
+		cmd = "opencode --port",
   },
 	events = {
     enabled = true,
