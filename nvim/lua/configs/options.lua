@@ -38,3 +38,9 @@ vim.api.nvim_create_autocmd('DirChanged', {
 		print('Current directory changed to: ' .. vim.fn.getcwd())
 	end,
 })
+vim.api.nvim_create_autocmd("FileType", {
+  pattern = "qf",
+  callback = function()
+    vim.keymap.set("n", "<CR>", "<CR><cmd>cclose<CR>", { buffer = true, silent = true })
+  end,
+})
