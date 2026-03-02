@@ -19,5 +19,11 @@ alias cs='
   sudo ln -sf $HOME/.colima/default/docker.sock /var/run/docker.sock
 ' # docker for MacOS
 
+## eza
+alias __eza_base='eza --all --show-symlinks --header --long --grid --icons --hyperlink --no-user --no-filesize --color=always --color-scale --color-scale-mode=gradient --time-style=relative'
+alias ll='__eza_base'
+alias lt='__eza_base --tree --level=2'
+
 # search history via Ctrl+R
 source <(fzf --zsh)
+
