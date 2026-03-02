@@ -6,6 +6,9 @@ setopt autocd
 # colortheme
 eval "$(starship init zsh)"
 
+# zoxide
+eval "$(zoxide init zsh)"
+
 # alias
 alias v='nvim .'
 alias nv='nvim'
