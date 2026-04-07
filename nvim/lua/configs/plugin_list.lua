@@ -27,6 +27,15 @@ vim.pack.add({
 	{ name = 'winsep', src = 'https://github.com/nvim-zh/colorful-winsep.nvim' },
 
 	{ name = 'zenmode', src = 'https://github.com/folke/zen-mode.nvim' },
+
+	{ name = 'flutter-tools', src = 'https://github.com/nvim-flutter/flutter-tools.nvim' },
+
+	-- debug
+	{ name = 'nvim-dap', src = 'https://github.com/mfussenegger/nvim-dap' },
+	{ name = 'nvim-dap-ui', src = 'https://github.com/rcarriga/nvim-dap-ui' },
+	{ name = 'nvim-nio', src = 'https://github.com/nvim-neotest/nvim-nio' },
+	{ name = 'nvim-dap-virtual-text', src = 'https://github.com/thehamsta/nvim-dap-virtual-text' },
+	{ name = 'one-small-step-for-vimkind', src = 'https://github.com/jbyuki/one-small-step-for-vimkind' },
 })
 require('mini.starter').setup({header = '🦒'})
 require('smear_cursor').setup({})
@@ -89,3 +98,36 @@ require('colorful-winsep').setup {
 	},
 }
 vim.api.nvim_set_hl(0, 'ColorfulWinSep', { fg = '#00FF00', bg = 'black' })
+require("flutter-tools").setup {
+	flutter_path = "/opt/homebrew/bin/flutter",
+	debugger = {
+		enabled = true,
+	},
+}
+local dap = require "dap"
+local ui = require "dapui"
+ui.setup({})
+dap.configurations.lua = { 
+  { 
+    type = 'nlua', 
+    request = 'attach',
+    name = "Attach to running Neovim instance",
+  }
+}
+
+
+dap.adapters.nlua = function(callback, config)
+  callback({ type = 'server', host = config.host or "127.0.0.1", port = config.port or 8086 })
+end
+dap.listeners.before.attach.dapui_config = function()
+	ui.open()
+end
+dap.listeners.before.launch.dapui_config = function()
+	ui.open()
+end
+dap.listeners.before.event_terminated.dapui_config = function()
+	ui.close()
+end
+dap.listeners.before.event_exited.dapui_config = function()
+	ui.close()
+end

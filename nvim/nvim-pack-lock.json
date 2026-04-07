@@ -4,6 +4,10 @@
       "rev": "5c2ff68",
       "src": "https://github.com/olimorris/codecompanion.nvim"
     },
+    "flutter-tools": {
+      "rev": "677cc07",
+      "src": "https://github.com/nvim-flutter/flutter-tools.nvim"
+    },
     "fzf": {
       "rev": "b473477",
       "src": "https://github.com/junegunn/fzf"
@@ -40,6 +44,22 @@
       "rev": "b43df0b",
       "src": "https://github.com/nvim-mini/mini.starter"
     },
+    "nvim-dap": {
+      "rev": "4f5deb1",
+      "src": "https://github.com/mfussenegger/nvim-dap"
+    },
+    "nvim-dap-ui": {
+      "rev": "d9770a5",
+      "src": "https://github.com/rcarriga/nvim-dap-ui"
+    },
+    "nvim-dap-virtual-text": {
+      "rev": "fbdb48c",
+      "src": "https://github.com/thehamsta/nvim-dap-virtual-text"
+    },
+    "nvim-nio": {
+      "rev": "21f5324",
+      "src": "https://github.com/nvim-neotest/nvim-nio"
+    },
     "oil": {
       "rev": "919e155",
       "src": "https://github.com/stevearc/oil.nvim"
@@ -47,6 +67,10 @@
     "oil.nvim": {
       "rev": "7e1cd77",
       "src": "https://github.com/stevearc/oil.nvim"
+    },
+    "one-small-step-for-vimkind": {
+      "rev": "1af6ffb",
+      "src": "https://github.com/jbyuki/one-small-step-for-vimkind"
     },
     "opencode": {
       "rev": "e235528",

@@ -138,3 +138,13 @@ map({ 'n', 't', 'v' }, '<C-g>', C "lua require('opencode').ask('@this: ', { subm
 
 -- plugin:zenmode
 map('n', '<C-t>', C "lua require('zen-mode').toggle()", 'Toggle zenmode')
+
+-- plugin:nvim-dap
+map('n', L 'db', C "lua require('dap').toggle_breakpoint()")
+map('n', L 'dc', C "lua require('dap').continue()")
+map('n', L 'di', C "lua require('dap').step_into()")
+map('n', L 'do', C "lua require('dap').step_over()")
+map('n', L 'du', C "lua require('dap').step_out()")
+map('n', L 'dba', C "lua require('dap').step_back()")
+map('n', L 'dr', C "lua require('dap').restart()")
+
