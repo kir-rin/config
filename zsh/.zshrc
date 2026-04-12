@@ -13,11 +13,15 @@ eval "$(zoxide init zsh)"
 alias v='nvim .'
 alias nv='nvim'
 alias oc='opencode'
-alias cs='
-  colima delete -f &&
-  colima start --dns 8.8.8.8 &&
-  sudo ln -sf $HOME/.colima/default/docker.sock /var/run/docker.sock
-' # docker for MacOS
+
+# function: colima start with fzf architecture selector
+cs() {
+  local arch=$(echo -e "arm64\namd64" | fzf --prompt="Select architecture: " --height=3)
+  [[ -z "$arch" ]] && return 1
+  colima delete -f && \
+  colima start --arch "$arch" --vm-type vz --dns 8.8.8.8 && \
+  sudo ln -sf "$HOME/.colima/default/docker.sock" /var/run/docker.sock
+}
 
 ## eza
 alias __eza_base='eza --all --show-symlinks --header --long --grid --icons --hyperlink --no-user --no-filesize --color=always --color-scale --color-scale-mode=gradient --time-style=relative'
