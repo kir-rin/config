@@ -1,4 +1,4 @@
-vim.lsp.enable({'lua_ls', 'gopls', 'ts_ls', 'eslint', 'tailwindcss'})
+vim.lsp.enable({'lua_ls', 'gopls', 'ts_ls', 'eslint', 'tailwindcss', 'pyright'})
 
 vim.api.nvim_create_autocmd('LspAttach', {
 	group = vim.api.nvim_create_augroup('auto_completion', {}),
