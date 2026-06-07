@@ -33,3 +33,20 @@ ln -shf $HOME/config/opencode/opencode.json $HOME/.config/opencode/opencode.json
 
 # Cursor agent
 export PATH="$HOME/.local/bin:$PATH"
+
+# Infisical: inject secrets from cloud with local cache (TTL 24h)
+_INFISICAL_CACHE="$HOME/.cache/infisical-secrets.sh"
+_INFISICAL_TTL=86400
+
+if [ -f "$_INFISICAL_CACHE" ] && [ $(( $(date +%s) - $(stat -f %m "$_INFISICAL_CACHE" 2>/dev/null || echo 0) )) -lt $_INFISICAL_TTL ]; then
+  source "$_INFISICAL_CACHE"
+else
+  _result="$(infisical export --format=dotenv-export --env=prod --projectId=89a3b232-0a29-4b0f-869f-0c6d06d9d00d 2>/dev/null)"
+  if [ -n "$_result" ]; then
+    eval "$_result"
+    mkdir -p "$HOME/.cache"
+    echo "$_result" > "$_INFISICAL_CACHE"
+  elif [ -f "$_INFISICAL_CACHE" ]; then
+    source "$_INFISICAL_CACHE"
+  fi
+fi

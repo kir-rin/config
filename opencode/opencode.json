@@ -30,10 +30,6 @@
 		"command_list": "ctrl+p",
 		"messages_copy": "<leader>y"
 	},
-	"permission": {
-		"edit": "ask",
-		"bash": "ask"
-	},
 	"mcp": {
 		"context7": {
 			"type": "remote",
@@ -49,6 +45,60 @@
 			"type": "local",
 			"command": ["npx", "-y", "chrome-devtools-mcp@latest"],
 			"enabled" : true
-    }
+    },
+		"slack": {
+			"type": "local",
+			"command": ["npx", "-y", "slack-mcp-server@latest", "--transport", "stdio"],
+			"enabled": true,
+			"environment": {
+				"SLACK_MCP_XOXP_TOKEN": "${SLACK_MCP_XOXP_TOKEN}"
+			}
+		},
+		"atlassian": {
+			"type": "local",
+			"command": ["uvx", "mcp-atlassian"],
+			"enabled": true,
+			"env": {
+				"CONFLUENCE_URL": "${CONFLUENCE_BASE_URL}",
+				"CONFLUENCE_USERNAME": "${CONFLUENCE_USER_EMAIL}",
+				"CONFLUENCE_API_TOKEN": "${CONFLUENCE_API_TOKEN}",
+				"READ_ONLY_MODE": "true"
+			}
+		}
+	},
+	"permission": {
+		"mcp_confluence_search": "allow",
+		"mcp_confluence_get_page": "allow",
+		"mcp_confluence_get_page_by_title": "allow",
+		"mcp_confluence_get_page_ancestors": "allow",
+		"mcp_confluence_get_child_pages": "allow",
+		"mcp_confluence_get_spaces": "allow",
+		"mcp_confluence_get_space": "allow",
+		"mcp_confluence_search_pages": "allow",
+		"mcp_confluence_get_page_comments": "allow",
+		"mcp_confluence_get_page_labels": "allow",
+		"mcp_confluence_get_page_attachments": "allow",
+		"mcp_confluence_get_page_versions": "allow",
+		"mcp_confluence_get_page_views": "allow",
+		"mcp_confluence_get_current_user": "allow",
+		"mcp_confluence_create_page": "deny",
+		"mcp_confluence_update_page": "deny",
+		"mcp_confluence_delete_page": "deny",
+		"mcp_confluence_add_comment": "ask",
+		"mcp_confluence_add_label": "ask",
+		"mcp_jira_search": "allow",
+		"mcp_jira_get_issue": "allow",
+		"mcp_jira_get_all_projects": "allow",
+		"mcp_jira_get_all_project_statuses": "allow",
+		"mcp_jira_get_transitions": "allow",
+		"mcp_jira_search_fields": "allow",
+		"mcp_jira_get_agile_boards": "allow",
+		"mcp_jira_get_board_issues": "allow",
+		"mcp_jira_get_sprints": "allow",
+		"mcp_jira_get_sprint_issues": "allow",
+		"mcp_jira_create_issue": "deny",
+		"mcp_jira_update_issue": "deny",
+		"mcp_jira_delete_issue": "deny",
+		"mcp_jira_transition_issue": "deny"
 	}
 }
