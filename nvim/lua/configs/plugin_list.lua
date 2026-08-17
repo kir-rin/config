@@ -37,7 +37,22 @@ vim.pack.add({
 	{ name = 'nvim-dap-virtual-text', src = 'https://github.com/thehamsta/nvim-dap-virtual-text' },
 	{ name = 'one-small-step-for-vimkind', src = 'https://github.com/jbyuki/one-small-step-for-vimkind' },
 })
-require('mini.starter').setup({header = '🦒'})
+local starter = require('mini.starter')
+starter.setup({
+	header = '🦒',
+	items = {
+		starter.sections.builtin_actions(),        -- Edit new buffer / Quit Neovim
+		starter.sections.recent_files(10, false),  -- Recent files
+		-- nvim을 실행한 현재 경로(cwd) 탐색
+		{
+			name    = 'Browse cwd',
+			action  = function()
+				require('fzf-lua').files({ cwd = vim.fn.getcwd() })
+			end,
+			section = 'Builtin actions',
+		},
+	},
+})
 require('smear_cursor').setup({})
 require('gitsigns').setup({})
 require('rose-pine').setup({})
