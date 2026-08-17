@@ -41,16 +41,20 @@ local starter = require('mini.starter')
 starter.setup({
 	header = '🦒',
 	items = {
-		starter.sections.builtin_actions(),        -- Edit new buffer / Quit Neovim
-		starter.sections.recent_files(10, false),  -- Recent files
-		-- nvim을 실행한 현재 경로(cwd) 탐색
-		{
-			name    = 'Browse cwd',
-			action  = function()
-				require('fzf-lua').files({ cwd = vim.fn.getcwd() })
-			end,
-			section = 'Builtin actions',
-		},
+		starter.sections.recent_files(3, false, false),  -- 최근 파일 3개 (경로 표시 없음)
+		-- nvim을 실행한 현재 경로(cwd) 탐색 — 별도 섹션, 항목명에 실제 경로 표시
+		function()
+			local cwd = vim.fn.fnamemodify(vim.fn.getcwd(), ':~')
+			return {
+				{
+					name    = 'Browse ' .. cwd,
+					action  = function()
+						require('fzf-lua').files({ cwd = vim.fn.getcwd() })
+					end,
+					section = 'Current directory',
+				},
+			}
+		end,
 	},
 })
 require('smear_cursor').setup({})
