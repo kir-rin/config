@@ -13,7 +13,7 @@ eval "$(zoxide init zsh)"
 alias v='nvim .'
 alias nv='nvim'
 alias oc='opencode'
-alias herdrp='herdr --remote yunhui-mackbookpro --remote-keybindings server'
+alias herdrp='herdr --remote yunhui-macbookpro --remote-keybindings server'
 
 # claude / codex danger-mode shortcuts
 alias ycl='claude --dangerously-skip-permissions'
