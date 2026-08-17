@@ -14,6 +14,12 @@ alias v='nvim .'
 alias nv='nvim'
 alias oc='opencode'
 
+# claude / codex danger-mode shortcuts
+alias ycl='claude --dangerously-skip-permissions'
+alias yclr='claude --dangerously-skip-permissions --resume'
+alias yco='codex --dangerously-bypass-approvals-and-sandbox'
+alias ycor='codex --dangerously-bypass-approvals-and-sandbox resume'
+
 # function: colima start with fzf architecture selector
 cs() {
   local arch=$(echo -e "arm64\namd64" | fzf --prompt="Select architecture: " --height=3)
