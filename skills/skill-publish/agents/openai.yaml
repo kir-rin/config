@@ -1,0 +1,4 @@
+interface:
+  display_name: "Skill Publish"
+  short_description: "스킬 생성·전역 배선·공개 전 비밀값 스캔 절차"
+  default_prompt: "$skill-publish 를 사용해 새 스킬을 만들고 전역에서 쓰이도록 배선한 뒤, 공개 커밋 전 스캔까지 해줘."
