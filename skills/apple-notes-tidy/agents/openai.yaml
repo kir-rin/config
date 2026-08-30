@@ -1,0 +1,4 @@
+interface:
+  display_name: "Apple Notes Tidy"
+  short_description: "애플 메모를 요약·Slack 대조·병합해 카테고리별로 정리하는 절차"
+  default_prompt: "$apple-notes-tidy를 사용해 최근 애플 메모를 훑고, 폴더 분류 초안과 삭제·병합 후보를 표로 보여줘."
