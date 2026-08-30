@@ -14,7 +14,6 @@ alias v='nvim .'
 alias nv='nvim'
 alias oc='opencode'
 alias herdrp='herdr --remote yunhui-macbookpro --remote-keybindings server'
-alias herdr-active='herdr agent list | jq -r ".result.agents[] | select(.agent_status==\"working\") | \"\(.terminal_title_stripped)  [\(.pane_id)]\""'
 
 # claude / codex danger-mode shortcuts
 alias ycl='claude --dangerously-skip-permissions'
