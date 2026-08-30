@@ -1,0 +1,26 @@
+onboarding = false
+[theme]
+name = "catppuccin"
+auto_switch = false
+
+[[keys.command]]
+key = "prefix+alt+s"
+type = "shell"
+command = "bash ~/.claude/skills/side-chat/side-chat.sh toggle"
+description = "Side chat toggle"
+
+[[keys.command]]
+key = "prefix+alt+shift+s"
+type = "shell"
+command = "bash ~/.claude/skills/side-chat/side-chat.sh clear"
+description = "Side chat clear"
+
+# 진단용 — alt 없이 순수 prefix+글자만으로도 되는지 확인 (d는 기본 바인딩과 안 겹침)
+[[keys.command]]
+key = "prefix+d"
+type = "shell"
+command = "bash ~/.claude/skills/side-chat/side-chat.sh toggle"
+description = "Side chat toggle (diagnostic, no alt)"
+
+[ui]
+agent_panel_sort = "priority"
