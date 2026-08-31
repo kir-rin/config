@@ -22,6 +22,8 @@ alias yco='codex --dangerously-bypass-approvals-and-sandbox'
 alias ycor='codex --dangerously-bypass-approvals-and-sandbox resume'
 alias ykl='klaude-dev --dangerously-skip-permissions'
 alias yklr='klaude-dev --dangerously-skip-permissions --resume'
+alias yko='kodex-dev --dangerously-bypass-approvals-and-sandbox'
+alias ykor='kodex-dev --dangerously-bypass-approvals-and-sandbox resume'
 
 # function: colima start with fzf architecture selector
 cs() {
