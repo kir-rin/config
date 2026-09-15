@@ -224,6 +224,43 @@ Prompt의 금지 문구와 command pattern만으로 외부 부작용을 다 막�
 
 ## 상태 확인과 `blocked` 처리
 
+### Worker 는 coordinator 를 깨우지 않는다 — 대기를 걸어 둔다
+
+Herdr worker 는 **별개의 CLI 프로세스**다. Coordinator 의 native subagent 가 아니라
+끝나도 coordinator 대화로 돌아오는 callback 이 없다. `herdr agent list` 를 **직접
+칠 때만** 상태를 안다.
+
+그래서 여러 worker 를 동시에 띄우고 그냥 두면, 사용자가 "다 끝난 것 같은데 왜
+보고가 없냐" 고 물을 때까지 완료를 모른다. 실제로 그렇게 됐다 (2026-09-15,
+worker 5개). 보고 시점이 전부 "사용자가 물어본 순간" 이 된다.
+
+**Worker 를 띄웠으면 같은 turn 에 대기를 건다.** Coordinator runtime 이 백그라운드
+프로세스 종료로 재진입하는 기능을 제공하면 거기에 태운다 (Claude Code 는 Bash 의
+`run_in_background`). 그런 기능이 없으면 사용자에게 "완료를 자동으로 알 수 없으니
+물어봐 달라" 고 미리 말한다 — 조용히 모르고 있지 않는다.
+
+```bash
+for n in <worker들>; do
+  herdr agent wait "$n" --until idle --until done --until blocked --timeout 3000000
+done
+echo "=== 전 worker settled ==="
+```
+
+`herdr agent wait` 는 settle 될 때까지 막으므로, 이걸 백그라운드로 돌리면 프로세스
+종료가 곧 "끝났다" 는 신호가 된다.
+
+### 사용자가 pane 에 직접 친 입력은 제출되지 않았을 수 있다
+
+Worker 결과를 읽을 때 화면 맨 아래 입력줄(`❯`)에 **보내지지 않은 텍스트**가 남아
+있는지 함께 본다. 사용자가 pane 에 직접 타이핑했는데 제출이 안 된 경우다.
+사용자 쪽에서는 지시한 줄 알고 기다리고, worker 는 받은 적이 없어 답하지 않는다.
+2026-09-15 에 5건이 그렇게 떠 있었다.
+
+발견하면 **내용을 사용자에게 그대로 보여 주고** 보낼지 묻는다. 임의로 보내지
+않는다 — 그 지시가 지금도 유효한지는 사용자만 안다. 보낼 때는 그 worker 가 그
+파일의 소유자인지 먼저 확인한다. 소유자가 아니면 소유 worker 로 돌린다.
+
+
 세 상태는 서로 다르다.
 
 | 상태 | 의미 |
@@ -341,6 +378,8 @@ Prompt `stalled`, wait timeout, `unknown` lifecycle은 곧바로 fallback 조건
 - [ ] Claude Code / Codex / OpenCode skill이 같은 source-of-truth 문서를 가리킨다.
 - [ ] Worker tab이 최대 2행 3열이며 agent pane이 5개를 넘지 않는다.
 - [ ] 나눈 pane 마다 작업 내용을 담은 label 이 붙어 있다 (순번만 쓴 이름 금지).
+- [ ] Worker 를 띄운 turn 에 완료 대기(`herdr agent wait`)를 걸었거나, 자동으로 알 수 없다고 사용자에게 말했다.
+- [ ] 결과를 읽을 때 pane 입력줄에 보내지지 않은 사용자 입력이 없는지 확인했다.
 - [ ] 여섯 번째 task가 queue에 남는다.
 - [ ] Read-only worker에 검증된 file read·search tool만 노출되고 mutation·delegation·external tool이 거부된다.
 - [ ] OpenCode의 explicit `deny`가 금지된 command를 prompt 없이 차단한다.
