@@ -1,9 +1,43 @@
 ---
 name: herdr-orchestration
-description: Herdr worker로 작업을 위임할 때의 routing·layout·권한·격리·결과 회수 규칙. 병렬 agent 실행, 다른 terminal에서 worker 띄우기, 장기 실행 작업 위임, worker 상태 확인과 blocked 처리, 병렬 write와 worktree 판단이 필요할 때 사용한다. "herdr", "worker 띄워줘", "병렬로 돌려줘", "다른 탭에서 실행", "agent 위임" 요청에 적용.
+description: Herdr worker로 작업을 위임할 때의 routing·layout·권한·격리·결과 회수 규칙. 병렬 agent 실행, 다른 terminal에서 worker 띄우기, 장기 실행 작업 위임, worker 상태 확인과 blocked 처리, 병렬 write와 worktree 판단이 필요할 때 사용한다. "herdr", "herdr tab", "worker 띄워줘", "병렬로 돌려줘", "다른 탭에서 실행", "탭 만들어서 거기에", "pane 나눠줘", "각각 나눠서 진행", "agent 위임" 요청에 적용.
 ---
 
 # Herdr 에이전트 오케스트레이션
+
+## 먼저 — Herdr가 무엇인지 헷갈리지 않는다
+
+Herdr는 **AI 코딩 에이전트용 터미널 워크스페이스 매니저**다
+(`/opt/homebrew/bin/herdr`, 백그라운드 server + TUI client). 자체 workspace · tab ·
+pane 을 갖고, 그 안의 agent 상태(`working`·`idle`·`blocked`·`done`)를 인식한다.
+
+**사용자가 "herdr tab" · "pane" 이라고 하면 Herdr의 것이지 터미널 에뮬레이터의
+것이 아니다.** Herdr는 WezTerm·iTerm·Ghostty 안에서 돌기 때문에 겉보기가 같다.
+터미널 탭 제목에 `herdr`가 떠 있는 것은 그 pane에서 Herdr TUI가 돌고 있다는
+뜻이지 탭 이름이 아니다.
+
+### 손대기 전에 세 줄
+
+```bash
+test "${HERDR_ENV:-}" = 1 || echo "Herdr 밖이다 — 제어하지 않는다"
+printf '%s\n' "$HERDR_WORKSPACE_ID" "$HERDR_TAB_ID" "$HERDR_PANE_ID"
+herdr --skill    # 공식 에이전트 가이드. CLI 구문의 정본이다
+```
+
+`HERDR_ENV=1`이면 **터미널 에뮬레이터 CLI를 쓰지 않는다** —
+`wezterm cli split-pane` · `tmux split-window` 금지. 이유 둘:
+
+- Herdr가 자기 레이아웃을 모르게 되어 agent 인식·상태 추적이 깨진다.
+- 에뮬레이터 GUI가 재시작하면 그 pane이 전부 죽는다. Herdr는 server가 세션을
+  들고 있어 살아남는다. (실측 2026-09-15: WezTerm 재시작으로 작업 중이던
+  agent 5개 소실)
+
+### 플래그를 추측하지 않는다
+
+`herdr <group>`을 인자 없이 실행하면 그 그룹의 서브커맨드가 나온다
+(`herdr tab` · `herdr pane` · `herdr agent`). 설치된 바이너리가 정본이다.
+단, **bare `herdr`는 실행하지 않는다** — TUI가 뜬다. `herdr workspace create`처럼
+기본값만으로 실행되는 변경 명령을 "도움말 보려고" 인자 없이 부르지 않는다.
 
 Source of truth: <https://socra-tutor-frontend-wiki.vercel.app/common/guides/herdr-orchestration>
 (문서가 갱신되면 이 SKILL.md도 함께 갱신한다.)
@@ -71,6 +105,52 @@ parent workspace
 - 별도 worktree worker는 worktree의 `cwd`를 가진 별도 workspace에 둘 수 있다.
 
 Tab label은 `workers-04`처럼 순번만 쓰지 말고 task 목적을 드러낸다. 같은 parent task에서 파생된 tab은 공통 prefix + 증가하는 loop 번호를 쓴다. 결과를 회수한 뒤 worker label에 `[done]`, `[blocked]`, `[failed]` 중 하나를 붙인다.
+
+### 새 탭에 worker N개 — 명령 순서
+
+```bash
+REPO=$PWD
+herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$REPO" \
+  --label "<task 목적>" --no-focus          # → .result.tab, .result.root_pane
+
+# 넓은 pane은 right, 좁거나 높은 pane은 down. 한 방향 연속 분할 금지
+herdr pane split --pane <root> --direction right --cwd "$REPO" --no-focus
+herdr pane split --pane <root> --direction down  --cwd "$REPO" --no-focus
+# → 각 응답의 .result.pane.pane_id 를 읽어 쓴다. 예측하지 않는다
+
+herdr pane rename <pane-id> "<A · 무슨 일>"    # 필수 — 아래 참조
+herdr agent start <name> --kind claude --pane <pane-id>
+herdr agent prompt <name> "<task contract>"
+```
+
+#### pane 을 나눴으면 반드시 이름을 붙인다
+
+```bash
+herdr pane rename <PANE_ID> <LABEL>...    # --clear 로 해제
+```
+
+**분할 직후, agent 를 붙이기 전에 한다.** 선택이 아니라 절차의 일부다.
+
+이름이 없으면 pane 은 `wG:p2T` 같은 불투명 ID 로만 남는다. worker 가 셋을 넘어가면
+사용자도, coordinator 도 어느 칸이 무슨 일을 하는지 화면만 보고는 알 수 없다.
+`blocked` 가 떴을 때 "어느 작업이 막혔나" 를 ID 로 역추적하는 비용이 그대로 든다.
+
+- 라벨은 **작업 내용**을 쓴다. `worker-1` · `pane A` 처럼 순번만 쓰지 않는다.
+- 레인을 나눠 돌리면 라벨 앞에 레인 문자를 둔다 — `A · 도메인 소노정본`,
+  `B · 4단계 표`. agent 이름(`lane-a`)과 라벨의 문자가 같아야 CLI 와 화면이 맞물린다.
+- 한 tab 에서 runtime 을 섞으면 라벨에 runtime 을 함께 표시한다 (위 「런타임 선택」).
+- 결과를 회수한 뒤에는 라벨 끝에 `[done]` · `[blocked]` · `[failed]` 를 붙인다
+  (「Workspace와 pane 배치」의 tab label 규칙과 같은 기준).
+- tab 도 마찬가지다 — `herdr tab rename <TAB_ID> <LABEL>`, 또는 `tab create --label`.
+
+- 이름은 `[a-z][a-z0-9_-]{0,31}`, live agent 중 유일해야 한다.
+- `agent start`는 기존 shell pane이 프롬프트 상태여야 한다. **레이아웃을 만들지 않는다** —
+  pane은 `pane split`으로 먼저 준비한다.
+- 프롬프트 본문이 길거나 따옴표·백틱이 많으면 파일에 쓰고
+  `"다음 파일을 읽고 그대로 수행해라: <절대경로>"`로 보낸다.
+- `agent start` 직후 폴더 신뢰·MCP 승인 프롬프트로 멈출 수 있다.
+  `herdr pane read`로 **화면을 먼저 읽고** `herdr pane send-keys`로 답한다.
+  기본 선택지가 의도와 맞는지 확인하지 않고 `enter`를 보내지 않는다.
 
 ## 동시 실행과 대기열
 
@@ -224,6 +304,11 @@ Output이 길거나 machine-readable 결과가 필요할 때만 workspace 밖의
 
 같은 worktree의 병렬 writer에는 path ownership을 할당한다.
 
+Write scope를 나눌 때 **파일 단위로 소유자가 정확히 하나인지 먼저 확인한다.**
+주제로 나누면 한 파일을 두 worker가 갖게 되기 쉽다 — 용어 개명처럼 화면 전체에
+퍼지는 작업은 그 화면을 맡은 worker와 반드시 부딪힌다. 나눈 뒤 `파일 → worker`
+표를 만들어 중복이 없는지 눈으로 확인하고 dispatch 한다.
+
 ```
 Write scope: apps/web/src/features/auth/**
 
@@ -255,6 +340,7 @@ Prompt `stalled`, wait timeout, `unknown` lifecycle은 곧바로 fallback 조건
 
 - [ ] Claude Code / Codex / OpenCode skill이 같은 source-of-truth 문서를 가리킨다.
 - [ ] Worker tab이 최대 2행 3열이며 agent pane이 5개를 넘지 않는다.
+- [ ] 나눈 pane 마다 작업 내용을 담은 label 이 붙어 있다 (순번만 쓴 이름 금지).
 - [ ] 여섯 번째 task가 queue에 남는다.
 - [ ] Read-only worker에 검증된 file read·search tool만 노출되고 mutation·delegation·external tool이 거부된다.
 - [ ] OpenCode의 explicit `deny`가 금지된 command를 prompt 없이 차단한다.
