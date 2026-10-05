@@ -1,0 +1,4 @@
+interface:
+  display_name: "machine-handover"
+  short_description: ""
+  default_prompt: "$machine-handover 를 사용해 …"
