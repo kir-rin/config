@@ -183,10 +183,11 @@ State files:
 한 세션에서 끝나지 않을 수 있는 작업(고칠 항목이 여러 개, 여러 차수, 장시간)은 contract에 아래 규칙을 함께 넣는다. 근거: Anthropic, "Effective harnesses for long-running agents".
 
 - **상태 파일은 scratchpad 밖에 둔다.** 세션 scratchpad(`/private/tmp/...`)는 세션과 함께 사라진다. worktree 옆의 `_state/` 같은 남는 자리에 task마다 두 개를 둔다. 레포에 커밋하지 않는다.
-  - `<task-id>-features.json` — `[{"id","what","check","passes":false,"commit":null,"note"}]`. 한 번 쓴 항목은 지우거나 `what`·`check`를 고치지 않는다. 바꾸는 것은 `passes`·`commit`·`note`뿐이다.
+  - `<task-id>-features.json` — `[{"id","what","check","approved":false,"passes":false,"commit":null,"note"}]`. 한 번 쓴 항목은 지우거나 `what`·`check`를 고치지 않는다. worker가 바꾸는 것은 `passes`·`commit`·`note`뿐이고, `approved`는 사용자 승인으로만 바뀐다.
   - `<task-id>-progress.md` — 항목 하나가 끝날 때마다 `시각 | 항목 | 한 일 | 다음에 할 것` 한 줄씩 덧붙인다.
+- **목록은 구현 전에 사용자 승인을 받는다.** worker가 features.json을 만들면(리뷰 지적·조사 결과로 만든 목록 포함) 구현하지 않고 `blocked`로 멈춘다. coordinator는 task별 목록을 우선순위 순 표(항목 · 사용자가 겪는 문제 · 확인 방법 · 추천 여부)로 사용자에게 보여 주고, 사용자가 고른 항목만 `approved: true`로 표시해 worker에게 돌려준다. worker는 `approved: true`인 항목만 구현한다. 구현 중 새 항목이 생기면 `approved: false`로 추가만 하고, 다음 승인 때 함께 올린다. worker나 coordinator가 승인을 대신하지 않는다.
 - **시작(재시작 포함):** progress.md, features.json, `git log --oneline -10`을 먼저 읽고, 빌드·스모크 테스트를 한 번 돌린다.
-- **한 번에 하나씩:** passes=false 항목 하나 → 고침 → `check`대로 확인(테스트·같은 화면 스크린샷) → passes=true → 체크포인트 → progress 한 줄 → 다음 항목. 지적을 다 모은 뒤 한꺼번에 고치지 않는다.
+- **한 번에 하나씩:** approved=true이고 passes=false인 항목 하나 → 고침 → `check`대로 확인(테스트·같은 화면 스크린샷) → passes=true → 체크포인트 → progress 한 줄 → 다음 항목. 지적을 다 모은 뒤 한꺼번에 고치지 않는다.
 - **체크포인트 = worktree 브랜치 로컬 커밋** (`<task-id> F<n>: <한 줄>`). push는 여전히 금지다. 커밋 신원은 사용자 전역 규칙대로 확인하고, 다르면 커밋하지 않고 progress에 기록한다. worktree가 없는 작업은 progress 기록만 한다.
 - **결과 보고의 수정 표는 features.json에서 뽑는다.** Status 블록 Verification에 `passes true/전체`를 적는다.
 - 차수가 늘어나도 공통 규칙 파일을 `_common2`·`_common3`처럼 쌓지 않는다. 하나의 공통 파일을 고쳐 쓰고, 바뀐 줄을 worker에게 알린다.
