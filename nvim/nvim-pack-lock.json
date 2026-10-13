@@ -20,6 +20,10 @@
       "rev": "20ad441",
       "src": "https://github.com/lewis6991/gitsigns.nvim"
     },
+    "herdr-nvim-nav": {
+      "rev": "ec047fd",
+      "src": "https://github.com/aimdevlee/herdr-nvim-nav"
+    },
     "lazygit": {
       "rev": "32a701cb",
       "src": "https://github.com/jesseduffield/lazygit"

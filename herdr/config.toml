@@ -15,5 +15,57 @@ type = "shell"
 command = "bash ~/.claude/skills/side-chat/side-chat.sh clear"
 description = "Side chat clear"
 
+# quick ask — 복사한 텍스트를 인용해 팝업에서 즉석 질문 (ChatGPT 드래그-인용 스타일)
+[[keys.command]]
+key = "prefix+a"
+type = "popup"
+command = "bash ~/.claude/skills/quick-ask/quick-ask.sh"
+width = "70%"
+height = "70%"
+description = "Quick ask (인용 질문)"
+
+# comment on copy — 드래그 선택 → 코멘트 팝업 → 에이전트로 전송 (rheech22/herdr-comment-on-copy)
+[[keys.command]]
+key = "prefix+m"
+type = "plugin_action"
+command = "comment_on_copy.toggle"
+description = "Comment on copy toggle"
+
+# herdr-bar — Cmd+K 스타일 퀵 스위처 (jeffarese/herdr-bar)
+[[keys.command]]
+key = "prefix+k"
+type = "plugin_action"
+command = "herdr-bar.open"
+description = "command bar"
+
 [ui]
 agent_panel_sort = "priority"
+copy_on_select = true
+
+# comment on copy 모드가 켜져 있으면 Spaces에 [c] 표시 (기본 rows + $comment_on_copy)
+[ui.sidebar.spaces]
+rows = [
+  ["state_icon", "workspace", "$comment_on_copy"],
+  ["branch", "git_status"],
+]
+
+# herdr-nvim-nav — ctrl+h/j/k/l로 herdr pane과 nvim split을 구분 없이 이동 (aimdevlee/herdr-nvim-nav)
+[[keys.command]]
+key = "ctrl+h"
+type = "plugin_action"
+command = "herdr-nvim-nav.left"
+
+[[keys.command]]
+key = "ctrl+j"
+type = "plugin_action"
+command = "herdr-nvim-nav.down"
+
+[[keys.command]]
+key = "ctrl+k"
+type = "plugin_action"
+command = "herdr-nvim-nav.up"
+
+[[keys.command]]
+key = "ctrl+l"
+type = "plugin_action"
+command = "herdr-nvim-nav.right"

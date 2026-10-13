@@ -28,6 +28,9 @@ vim.pack.add({
 
 	{ name = 'zenmode', src = 'https://github.com/folke/zen-mode.nvim' },
 
+	-- <C-h/j/k/l>로 nvim split과 herdr pane을 구분 없이 이동 (herdr 쪽 플러그인과 짝)
+	{ name = 'herdr-nvim-nav', src = 'https://github.com/aimdevlee/herdr-nvim-nav' },
+
 	{ name = 'flutter-tools', src = 'https://github.com/nvim-flutter/flutter-tools.nvim' },
 
 	-- debug
@@ -61,6 +64,7 @@ require('smear_cursor').setup({})
 require('gitsigns').setup({})
 require('rose-pine').setup({})
 require('mason').setup({})
+require('herdr-nvim-nav').setup({ with_tmux = false })
 require('oil').setup {
 	lsp_file_methods = {
 		enabled = true,

@@ -29,8 +29,9 @@ map('n', L 'q', C 'quit', 'Quit buffer')
 map('n', L 'e', C 'Oil', 'Open file explorer')
 
 -- navigation
-map('n', '<C-k>', '<C-u>zz', 'Scroll up and center')
-map('n', '<C-j>', '<C-d>zz', 'Scroll down and center')
+-- <C-h/j/k/l>은 herdr-nvim-nav가 split·herdr pane 이동으로 쓴다 (plugin_list.lua)
+map('n', '<C-u>', '<C-u>zz', 'Scroll up and center')
+map('n', '<C-d>', '<C-d>zz', 'Scroll down and center')
 
 -- config files
 map({ 'n', 'v', 'x' }, L 'v', C 'e $MYVIMRC', 'Edit nvim config')
