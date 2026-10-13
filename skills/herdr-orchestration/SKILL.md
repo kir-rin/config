@@ -1,6 +1,6 @@
 ---
 name: herdr-orchestration
-description: Herdr worker로 작업을 위임할 때의 routing·layout·권한·격리·결과 회수 규칙. 병렬 agent 실행, 다른 terminal에서 worker 띄우기, 장기 실행 작업 위임, worker 상태 확인과 blocked 처리, 병렬 write와 worktree 판단이 필요할 때 사용한다. "herdr", "herdr tab", "worker 띄워줘", "병렬로 돌려줘", "다른 탭에서 실행", "탭 만들어서 거기에", "pane 나눠줘", "각각 나눠서 진행", "agent 위임" 요청에 적용.
+description: Herdr worker로 작업을 위임할 때의 routing·layout·권한·격리·결과 회수 규칙. 병렬 agent 실행, 다른 terminal에서 worker 띄우기, 장기 실행 작업 위임, worker 상태 확인과 blocked 처리, 병렬 write와 worktree 판단이 필요할 때 사용한다. "herdr", "herdr tab", "worker 띄워줘", "병렬로 돌려줘", "다른 탭에서 실행", "탭 만들어서 거기에", "pane 나눠줘", "각각 나눠서 진행", "agent 위임", "세션 fork해서 새 탭에", "이 대화 포크", "빈 클로드 새 탭에" 요청에 적용.
 ---
 
 # Herdr 에이전트 오케스트레이션
@@ -151,6 +151,20 @@ herdr pane rename <PANE_ID> <LABEL>...    # --clear 로 해제
 - `agent start` 직후 폴더 신뢰·MCP 승인 프롬프트로 멈출 수 있다.
   `herdr pane read`로 **화면을 먼저 읽고** `herdr pane send-keys`로 답한다.
   기본 선택지가 의도와 맞는지 확인하지 않고 `enter`를 보내지 않는다.
+
+### 세션 fork · 빈 세션을 새 탭에
+
+worker가 아니라 사용자가 직접 쓸 대화를 띄우는 경우다. 확인 없이 바로 띄운다.
+
+```bash
+herdr tab create --workspace "$HERDR_WORKSPACE_ID" --cwd "$PWD" --label "fork · <대화 주제>"
+herdr pane run <root_pane> "claude --resume <SESSION_ID> --fork-session"   # 빈 세션은 "claude"
+```
+
+- 지금 대화를 fork: `<SESSION_ID>`는 매 턴 hook context의 `CLAUDE_SESSION_ID`.
+- "최근 세션"을 fork: `~/.claude/projects/<cwd 인코딩>/*.jsonl`을 수정 시각 순으로 보고
+  현재 세션을 뺀다. 첫 user 메시지를 함께 보여 주면 어느 대화인지 맞출 수 있다.
+- Codex·OpenCode면 command만 바꾼다. 띄운 뒤 `herdr pane read`로 입력 대기인지 확인한다.
 
 ## 동시 실행과 대기열
 
