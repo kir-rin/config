@@ -190,6 +190,7 @@ Deliverable:
 Verification:
 Completion criteria:
 State files:
+Sources:            # 원문 파일·decisions 경로. 요건·회신 작업이면 source-grounding 스킬 규칙 1~3
 ```
 
 ### 이어서 하기 — 세션이 끊겨도 같은 자리에서 다시 시작
