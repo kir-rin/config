@@ -1,0 +1,4 @@
+interface:
+  display_name: "e2e-capture"
+  short_description: "브라우저 E2E 실행 + 단계별 주석 스크린샷 + 판정 리포트"
+  default_prompt: "$e2e-capture 를 사용해 방금 구현한 기능을 시나리오대로 브라우저에서 밟아 보고 캡처·리포트를 만들어 줘"
