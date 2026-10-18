@@ -13,7 +13,7 @@ eval "$(zoxide init zsh)"
 alias v='nvim .'
 alias nv='nvim'
 alias oc='opencode'
-alias herdrp='herdr --remote yunhui-macbookpro --remote-keybindings server'
+alias herdrp='herdr'  # 저장 기기(company·windows)를 한 창에 — herdr machine list
 
 # claude / codex danger-mode shortcuts
 alias ycl='claude --dangerously-skip-permissions'
