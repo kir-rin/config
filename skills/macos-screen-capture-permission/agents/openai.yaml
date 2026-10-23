@@ -1,0 +1,4 @@
+interface:
+  display_name: "macos-screen-capture-permission"
+  short_description: "macOS 화면 기록(TCC) 권한 버그 진단·수정·검증"
+  default_prompt: "$macos-screen-capture-permission 를 사용해 맥에서 캡처가 배경만 찍히는 문제를 진단해줘"
