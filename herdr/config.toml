@@ -69,3 +69,7 @@ command = "herdr-nvim-nav.up"
 key = "ctrl+l"
 type = "plugin_action"
 command = "herdr-nvim-nav.right"
+
+# 에이전트 알림 소리는 agent-bubble-notify 플러그인이 낸다(말풍선과 같이). 내장 소리를 켜면 두 번 울린다
+[ui.sound]
+enabled = false

@@ -1,0 +1,26 @@
+id = "yh.agent-bubble-notify"
+name = "Agent Bubble Notify"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "When an agent finishes or needs input: play a sound and show an AgentBot character bubble that jumps back to the pane."
+platforms = ["macos"]
+
+[[actions]]
+id = "toggle"
+title = "Toggle agent bubble notify"
+command = ["node", "toggle.mjs"]
+
+[[actions]]
+id = "test"
+title = "Agent bubble notify: send a test bubble for the focused pane"
+command = ["node", "notify.mjs", "--test"]
+
+# done/blocked → 소리 + 말풍선, working → 그 pane 말풍선 걷기
+[[events]]
+on = "pane.agent_status_changed"
+command = ["node", "notify.mjs"]
+
+# 그 pane 을 직접 보러 가면 말풍선 걷기
+[[events]]
+on = "pane.focused"
+command = ["node", "clear.mjs"]
