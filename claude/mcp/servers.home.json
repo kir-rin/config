@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "aws-docs": {
+      "command": "uvx",
+      "args": ["awslabs.aws-documentation-mcp-server@latest"]
+    },
+    "aws-api": {
+      "command": "uvx",
+      "args": ["awslabs.aws-api-mcp-server@latest"],
+      "env": {
+        "AWS_PROFILE": "aws-privacy",
+        "AWS_REGION": "ap-northeast-2",
+        "READ_OPERATIONS_ONLY": "true"
+      }
+    },
+    "ms365-mcp-mini": {
+      "command": "npx",
+      "args": ["-y", "github:krafton-playground/ms365-mcp-mini"],
+      "env": {
+        "MS365_MCP_FILE_ROOT": "${HOME}/Downloads/higgsfield_kit"
+      }
+    }
+  }
+}

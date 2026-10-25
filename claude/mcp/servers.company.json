@@ -1,0 +1,34 @@
+{
+  "mcpServers": {
+    "k-on": {
+      "command": "${HOME}/.local/bin/uv",
+      "args": ["run", "--directory", "${HOME}/Krafton/infra/k-on-mcp", "k-on-mcp"]
+    },
+    "excalidraw": {
+      "command": "${HOME}/.pixi/bin/node",
+      "args": ["${HOME}/Krafton/infra/mcp-excalidraw/node_modules/mcp-excalidraw-server/dist/bin.js"],
+      "env": {
+        "EXCALIDRAW_EXPORT_DIR": "${HOME}/Krafton/project-canvas",
+        "EXPRESS_SERVER_URL": "http://127.0.0.1:3917",
+        "PORT": "3917",
+        "HOST": "127.0.0.1",
+        "ENABLE_CANVAS_SYNC": "true"
+      }
+    },
+    "tldraw": {
+      "command": "${HOME}/.pixi/bin/node",
+      "args": ["${HOME}/Krafton/infra/tldraw-mcp-astral/src/index.js"],
+      "env": {
+        "TLDRAW_BOARDS_DIR": "${HOME}/Krafton/project-canvas"
+      }
+    },
+    "affine": {
+      "command": "${HOME}/Krafton/infra/affine-mcp/run.sh",
+      "args": []
+    },
+    "feedback-desk": {
+      "command": "/Applications/피드백 데스크.app/Contents/MacOS/feedback-sidecar",
+      "args": ["mcp"]
+    }
+  }
+}
