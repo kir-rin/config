@@ -98,9 +98,10 @@ export async function bus(path, body, timeoutMs = 3000) {
 export const bubbleId = (pane) => `herdr:${pane}`;
 
 // 말풍선 버튼과 ref: AgentBot 은 herdr 를 모른다 — 본문·[세션으로 가기]를 누르면 데몬이 bubble-action { id, key, ref } 를 SSE 로 내보내고,
-// herdr-bridge.mjs 가 ref 를 읽어 그 세션으로 간다. ref = JSON { h: 1, pane, session?, machine? } (200자 안쪽)
+// herdr-bridge.mjs 가 ref 를 읽어 그 세션으로 간다. ref = JSON { h: 1, pane, session?, machine?, t } (200자 안쪽)
+// t: 보낸 때 — 같은 id 로 새 알림이 오면 ref 가 달라져, 늦게 끝난 처리가 새 알림을 걷지 않는다(clear ifRef)
 export const SESSION_BUTTONS = [{ key: "default", label: "세션으로 가기" }];
-export const herdrRef = ({ pane, session, machine }) => JSON.stringify({ h: 1, pane, ...(machine ? { machine } : session ? { session } : {}) });
+export const herdrRef = ({ pane, session, machine }) => JSON.stringify({ h: 1, pane, ...(machine ? { machine } : session ? { session } : {}), t: Date.now() });
 export function parseHerdrRef(ref) {
   let r;
   try { r = JSON.parse(ref); } catch { return null; }

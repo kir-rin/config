@@ -32,8 +32,8 @@ async function machines() {
   return rows.filter((m) => m?.enabled !== false && m?.label).map((m) => m.label);
 }
 
-// 말풍선 id 에 넣을 머신 이름(빈칸 등은 _)
-const slug = (m) => m.replace(/[^\w.-]/g, "_");
+// 말풍선 id 에 넣을 머신 이름: 영숫자·_.- 밖의 글자는 _<코드> 로(서로 다른 이름이 같은 id 가 되지 않게)
+const slug = (m) => m.replace(/[^A-Za-z0-9.-]/g, (c) => `_${c.codePointAt(0).toString(16)}`);
 export const machineBubbleId = (m, pane) => `herdr:${slug(m)}:${pane}`;
 
 // 직전(prev: pane → {status, seq, focused})과 지금 목록 → 알릴 것·걷을 것. 순수 함수
@@ -109,7 +109,10 @@ async function poll(m) {
     }
     const stale = !w.prev || Date.now() - w.okAt > REBASE_MS;
     const { notify: todo, clear, next } = machineChanges(stale ? new Map() : w.prev, agents);
-    if (stale) note(`[${m}] baseline ${next.size} panes`);
+    if (stale) {
+      note(`[${m}] baseline ${next.size} panes`);
+      if (w.prev) for (const pane of w.prev.keys()) if (!next.has(pane)) clear.push(pane); // 끊긴 사이 닫힌 pane 의 말풍선
+    }
     w.prev = next;
     w.okAt = Date.now();
     w.backoff = 0;
@@ -146,11 +149,29 @@ export function pickTerminal(psText, override) {
 // herdr 는 붙어 있는 화면(클라이언트)을 다른 머신으로 넘기는 명령이 없다(herdr#5531 — CLI --machine 은 그 서버만 바꾼다).
 // 그래서 사이드바 키 길(prefix → w → ↑↓ → Enter)을 herdr 화면에 대신 보낸다(WezTerm 만 — wezterm cli send-text)
 
-// herdr config 의 keys.prefix(배열이면 첫 값, 없으면 ctrl+b) → 보낼 바이트. ctrl+<글자> 만(명령 인자로 보내므로 NUL 인 ctrl+space 는 못 보낸다), 그 밖은 null
+// herdr config 의 [keys] 표만 → { prefix(배열이면 첫 값), 값 목록 }. 다른 표의 같은 이름은 안 본다
+function keysTable(configText) {
+  let inKeys = false;
+  const keys = {};
+  for (const raw of String(configText ?? "").split("\n")) {
+    const line = raw.replace(/#.*$/, "").trim();
+    const t = line.match(/^\[([^\]]+)\]$/);
+    if (t) { inKeys = t[1].trim() === "keys"; continue; }
+    if (line.startsWith("[[")) { inKeys = false; continue; }
+    const kv = inKeys && line.match(/^([\w-]+)\s*=\s*(.+)$/);
+    if (kv) keys[kv[1]] = [...kv[2].matchAll(/"([^"]*)"/g)].map((x) => x[1].trim().toLowerCase());
+  }
+  return keys;
+}
+
+// 사이드바 키 길에 쓸 prefix 바이트. ctrl+<글자> 만(명령 인자로 보내므로 NUL 인 ctrl+space 는 못 보낸다).
+// prefix+w 를 다른 동작에 묶어 두었으면 null — 확실하지 않으면 키를 보내지 않는다(엉뚱한 pane 의 승인 창에 Enter 가 들어가지 않게)
 export function prefixBytes(configText) {
-  const m = String(configText ?? "").match(/^\s*prefix\s*=\s*\[?\s*"([^"]+)"/m);
-  const c = (m ? m[1] : "ctrl+b").trim().toLowerCase().match(/^ctrl\+([a-z])$/);
-  return c ? String.fromCharCode(c[1].charCodeAt(0) - 96) : null;
+  const keys = keysTable(configText);
+  const c = (keys.prefix?.[0] ?? "ctrl+b").match(/^ctrl\+([a-z])$/);
+  if (!c) return null;
+  if (Object.entries(keys).some(([k, v]) => k !== "prefix" && v.includes("prefix+w"))) return null;
+  return String.fromCharCode(c[1].charCodeAt(0) - 96);
 }
 
 // 사이드바 차례([{ machine, workspace }], 이 컴퓨터는 machine '') 에서 지금 칸 → 갈 칸: 아래(+)·위(-) 몇 칸. 못 찾으면 null
@@ -214,18 +235,28 @@ async function go(r) {
   const app = pickTerminal((await runRaw("ps", ["-axo", "comm"])).stdout, process.env.AGENT_BUBBLE_TERMINAL);
   if (app) await runRaw("open", ["-a", app]); // 못 띄워도 pane 은 옮겼다
   if (r.session) return null; // 이름 붙은 세션은 따로 붙은 화면 — 사이드바 이동은 안 한다
-  if (!(await showOnScreen(r.machine ?? "", r.pane.split(":")[0]))) return r.machine ? `${r.machine} 쪽 세션은 골라 뒀어요. herdr 사이드바에서 ${r.machine} 로 가 주세요.` : null;
+  if (!(await showOnScreen(r.machine ?? "", r.pane.split(":")[0]))) return `세션은 골라 뒀어요. herdr 사이드바에서 ${r.machine ?? "Local"} 로 가 주세요.`;
   return null;
 }
 
+// 우리(herdr 플러그인)가 띄운 말풍선인가 — id 가 ext:herdr: 로 시작. 아니면 다른 프로그램 몫이라 건드리지 않는다
+const ours = (id) => typeof id === "string" && id.startsWith("ext:herdr:");
+const inflight = new Set(); // 처리 중인 말풍선 id — 겹쳐 누르면 사이드바 키가 두 번 들어간다
+
 async function onAction({ id, key, ref }) {
+  if (!ours(id) || inflight.has(id)) return;
   const r = key === "default" && typeof ref === "string" ? parseHerdrRef(ref) : null;
-  if (!r || typeof id !== "string") return; // 다른 프로그램의 말풍선
-  const err = await go(r);
-  note(`action ${id} → ${r.machine ? `${r.machine}/` : ""}${r.pane} ${err ?? "ok"}`);
-  if (!err) return bus(`/bubbles/${encodeURIComponent(id)}/clear`);
-  // 못 갔으면 같은 말풍선을 이유로 바꾼다(버튼 없이, 잠깐)
-  await bus("/bubbles", { id, text: err, kind: "error", ttlMs: 8000 });
+  inflight.add(id);
+  try {
+    const err = r ? await go(r) : "이 알림은 어디로 가야 할지 몰라요.";
+    note(`action ${id} → ${r ? `${r.machine ? `${r.machine}/` : ""}${r.pane}` : "?"} ${err ?? "ok"}`);
+    // 갔으면 걷는다 — 그사이 같은 id 로 새 알림이 왔으면(ref 가 다르면) 그건 둔다
+    if (!err) return void (await bus(`/bubbles/${encodeURIComponent(id)}/clear`, { ifRef: ref }));
+    // 못 갔으면 같은 말풍선을 이유로 바꾼다(버튼 없이, 잠깐)
+    await bus("/bubbles", { id, text: err, kind: "error", ttlMs: 8000 });
+  } finally {
+    inflight.delete(id);
+  }
 }
 
 // GET /events?actions=1 을 붙잡고 bubble-action 만 받는다. 끊기면 3초 뒤 다시
