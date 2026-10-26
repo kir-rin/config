@@ -90,6 +90,8 @@ function summary(rep) {
   for (const b of t.byConcurrency) if (b.n) out.push(`    ${b.bucket.padStart(3)}개 기다릴 때  ${lat(b)}`);
   out.push(`  말풍선          ${mix(t.bubbles)}`);
   if (t.bubbles.actionAfter.n) out.push(`                  누르기까지 ${lat(t.bubbles.actionAfter)}`);
+  const rm = t.reminders;
+  if (rm?.digests) out.push(`  다시 알림       묶음 ${rm.digests}번 · 줄 ${rm.shown}개 — 가기 ${rm.go} · 답 ${rm.reply} · 미룸 ${rm.snooze} · 그만 ${rm.mute} · 닫음 ${rm.dismissed}`);
   out.push("");
   out.push("[날짜별]   끝남 대기 | 끝남→시작 중앙/p90 | 대기 중앙 | 대기 합 | 프롬프트/활동h | 재작업 | 동시 최대");
   for (const d of rep.days) {

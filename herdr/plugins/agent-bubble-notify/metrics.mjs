@@ -256,6 +256,17 @@ export function mixStats(shown) {
   return { shown: shown.length, ...counts, failed: shown.filter((s) => s.failed).length, actionAfter: dist(shown.filter((s) => s.after !== undefined).map((s) => s.after)) };
 }
 
+// 다시 알림(remind 이벤트, herdr-bridge.mjs): 묶음을 띄운 번 · 줄(세션) 수 · 누른 것(가기·답·미룸·그만·닫음)
+export function remindStats(events) {
+  const out = { digests: 0, shown: 0, go: 0, reply: 0, snooze: 0, mute: 0, dismissed: 0 };
+  for (const e of events) {
+    if (e.type !== "remind") continue;
+    if (e.action === "digest") out.digests++;
+    else if (e.action in out) out[e.action]++;
+  }
+  return out;
+}
+
 // 전체 리포트: 이벤트(이미 합침) → { range, total, days[], hours[], machines, viewers }
 // since·until: ms. 짝짓기는 범위 밖까지 보고(범위 앞에 시작한 대기의 응답), 셈은 대기 시작·프롬프트 때가 범위 안인 것만
 export function buildReport(allEvents, { canon = machineCanon(), since = -Infinity, until = Infinity, maxGapMs = DEFAULTS.maxGapMs, dedupMs = DEFAULTS.dedupMs } = {}) {
@@ -282,7 +293,7 @@ export function buildReport(allEvents, { canon = machineCanon(), since = -Infini
     events: { read: allEvents.length, overlapDropped: allEvents.length - merged.length, dedupDropped: dropped, inRange: evIn.length, backfill: evIn.filter((e) => e.backfill).length },
     viewers: [...new Set(evIn.map((e) => canon(e.viewer)))].sort(),
     machines: [...new Set(evIn.filter((e) => e.type === "status").map((e) => sessionMachine(e, canon)))].sort(),
-    total: { ...waitStats(waits, prompts, { actions }), bubbles: mixStats(shown) },
+    total: { ...waitStats(waits, prompts, { actions }), bubbles: mixStats(shown), reminders: remindStats(evIn) },
     days,
     hours,
   };

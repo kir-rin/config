@@ -3,12 +3,15 @@
 //    여기서 ref(lib.mjs herdrRef)를 읽어 그 세션으로 간다 — 이 컴퓨터든 다른 컴퓨터(herdr 저장 머신)든.
 // 2) 다른 컴퓨터 세션 알림: herdr 플러그인은 그 머신 서버에서만 돌고 이벤트도 넘어오지 않으므로,
 //    몇 초마다 `herdr --machine <이름> agent list` 로 상태를 물어 바뀐 것을 notify.mjs 와 같은 규칙으로 알린다(AGENT_BUBBLE_MACHINE_*)
+// 3) 답 안 한 세션 다시 알림(remind.mjs): events.jsonl·지금 상태로 「답 안 한 세션 N개」 묶음 하나(AGENT_BUBBLE_REMIND_*)
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { loadDotEnv, modeEnabled, envFlag, envInt, bus, note, speak, sessionButtons, herdrRef, parseHerdrRef, paneSource, bubbleKind, bubbleLife, machineBubbleId, logEvent } from "./lib.mjs";
+import { loadDotEnv, modeEnabled, envFlag, envInt, bus, note, speak, sessionButtons, herdrRef, parseHerdrRef, paneSource, bubbleKind, bubbleLife, machineBubbleId, logEvent, SESSION_BUTTONS, REPLY_BUTTON } from "./lib.mjs";
+import { parseEvents } from "./metrics.mjs";
+import { remindConfig, reminderState, digestPlan, stillShown, isRemindId, remindItemId, sessionKey, summaryText, snoozeLabel, SUMMARY_ID, REMIND_GROUP } from "./remind.mjs";
 
 loadDotEnv();
 const HERDR = process.env.HERDR_BIN_PATH || "herdr";
@@ -120,6 +123,7 @@ async function poll(m) {
       if (w.prev) for (const pane of w.prev.keys()) if (!next.has(pane)) clear.push(pane); // 끊긴 사이 닫힌 pane 의 말풍선
     }
     w.prev = next;
+    w.agents = new Map(agents.filter((a) => typeof a?.pane_id === "string").map((a) => [a.pane_id, a])); // 다시 알림 글·머리줄
     w.okAt = Date.now();
     w.backoff = 0;
     for (const t of transitions) logEvent("status", { machine: m, ...t });
@@ -336,6 +340,7 @@ const result = (id, ok, note) => bus(`/bubbles/${encodeURIComponent(id)}/result`
 
 async function onAction({ id, key, ref, text }) {
   if (!ours(id)) return;
+  if (isRemindId(id) && (await remindAction(id, key, ref))) return;
   const plan = actionPlan({ key, ref, text });
   const lane = lanes.get(id) ?? { queue: [], running: null };
   lanes.set(id, lane);
@@ -360,9 +365,15 @@ async function runAction({ id, key, ref, kind, r, text }) {
   // 보낸 말은 기록에 남기지 않는다(길이만)
   logEvent("action", { machine: r?.machine ?? "local", ...(r ? { pane: r.pane } : {}), id, key, ok: !err, ...(err ? { error: err } : {}), ...(kind === "reply" ? { replyLen: text.length } : {}) });
   note(`action ${id} ${key} → ${r ? `${r.machine ? `${r.machine}/` : ""}${r.pane}` : "?"}${kind === "reply" ? ` text=${text.length}자` : ""} ${err ?? "ok"}`);
+  const remind = !err && isRemindId(id) && r;
+  if (remind) logEvent("remind", { action: kind === "reply" ? "reply" : "go", machine: r.machine ?? "local", pane: r.pane });
   const told = await result(id, !err, err ?? undefined);
   // 갔으면(보냈으면) 걷는다 — 그사이 같은 id 로 새 알림이 왔으면(ref 가 다르면) 그건 둔다
-  if (!err) return void (await bus(`/bubbles/${encodeURIComponent(id)}/clear`, { ifRef: ref }));
+  if (!err) {
+    await bus(`/bubbles/${encodeURIComponent(id)}/clear`, { ifRef: ref });
+    if (remind && shown.delete(sessionKey(r.machine, r.pane))) await syncSummary(); // 다시 알림 줄 — 입력 대기면 다음 때 다시
+    return;
+  }
   // 못 갔는데 예전 데몬(결과 길 없음)이면 같은 말풍선을 이유로 바꾼다(버튼 없이, 잠깐)
   if (!told) await bus("/bubbles", { id, text: err, kind: "error", ttlMs: 8000 });
 }
@@ -371,7 +382,9 @@ async function runAction({ id, key, ref, kind, r, text }) {
 function onClosed({ id, reason, ref }) {
   if (!ours(id)) return;
   const r = typeof ref === "string" ? parseHerdrRef(ref) : null;
-  logEvent("closed", { machine: r?.machine ?? "local", ...(r ? { pane: r.pane } : {}), id, reason });
+  if (isRemindId(id)) return remindClosed(id, reason, r);
+  const status = r ? liveAgent(r.machine ?? "local", r.pane)?.status : undefined; // 닫힐 때 세션 상태(다시 알림 재료)
+  logEvent("closed", { machine: r?.machine ?? "local", ...(r ? { pane: r.pane } : {}), id, reason, ...(status ? { status } : {}) });
 }
 
 // GET /events?actions=1 을 붙잡고 bubble-action·bubble-closed 만 받는다. 끊기면 3초 뒤 다시
@@ -404,6 +417,183 @@ async function listenActions() {
   }
 }
 
+// ---- 3) 답 안 한 세션 다시 알림 ----
+const REMIND = remindConfig();
+const REMIND_TICK_MS = 60e3;
+const EVENTS_KEEP_MS = 3 * 24 * 3600e3; // 이보다 오래된 기록은 안 본다
+const local = { agents: new Map(), okAt: 0 }; // 이 컴퓨터 agent list(다시 알림 때 묻는다)
+
+// 지금 아는 그 세션: { status, info } | undefined(모름 — 그 머신 목록이 없거나 오래됨). 목록은 있는데 pane 이 없으면 gone
+function liveAgent(machine, pane) {
+  const w = !machine || machine === "local" ? local : watch.get(machine);
+  if (!w?.agents || Date.now() - w.okAt > 5 * 60e3) return undefined;
+  const a = w.agents.get(pane);
+  return a ? { status: String(a.agent_status ?? "").toLowerCase(), info: a } : { status: "gone" };
+}
+
+// events.jsonl 을 이어 읽는다(넘기기로 작아지면 처음부터). 사흘 넘은 것은 버린다
+const log = { file: process.env.HERDR_PLUGIN_STATE_DIR ? join(process.env.HERDR_PLUGIN_STATE_DIR, "events.jsonl") : null, offset: 0, rest: "", events: [] };
+function readEvents() {
+  if (!log.file) return log.events;
+  let size = 0;
+  try { size = statSync(log.file).size; } catch { return log.events; }
+  if (size < log.offset) Object.assign(log, { offset: 0, rest: "", events: [] });
+  if (size > log.offset) {
+    const fd = openSync(log.file, "r");
+    try {
+      const buf = Buffer.alloc(size - log.offset);
+      readSync(fd, buf, 0, buf.length, log.offset);
+      log.offset = size;
+      const text = log.rest + buf.toString("utf8");
+      const cut = text.lastIndexOf("\n") + 1;
+      log.rest = text.slice(cut);
+      log.events.push(...parseEvents(text.slice(0, cut)));
+    } finally {
+      closeSync(fd);
+    }
+  }
+  const old = Date.now() - EVENTS_KEEP_MS;
+  if (log.events.length && Date.parse(log.events[0].ts) < old) log.events = log.events.filter((e) => Date.parse(e.ts) >= old);
+  return log.events;
+}
+
+// 방해 금지 시간(AgentBot 설정 — GET /prefs/quiet). 예전 데몬·꺼져 있으면 아님
+async function quietNow() {
+  const base = (process.env.AGENT_BUBBLE_URL || "http://127.0.0.1:47891").replace(/\/+$/, "");
+  try {
+    const r = await fetch(`${base}/prefs/quiet`, { signal: AbortSignal.timeout(3000) });
+    return r.ok ? (await r.json())?.active === true : false;
+  } catch { return false; }
+}
+
+const shown = new Map(); // 떠 있는 묶음 줄: key → 세션
+let summarySig = "";
+let remindStarted = false;
+const remindBody = (s) => {
+  const m = s.machine === "local" ? undefined : s.machine;
+  const a = liveAgent(s.machine, s.pane)?.info ?? { pane_id: s.pane };
+  const title = a.label || a.terminal_title_stripped || a.name || a.agent || s.pane;
+  const at = new Date(s.closedAt).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const blocked = s.status === "blocked";
+  return {
+    id: remindItemId(s.machine, s.pane),
+    text: `${m ? `[${m}] ` : ""}${blocked ? `⚠️ ${title} 아직 확인을 기다려요` : `✅ ${title} 끝난 뒤 답이 없어요`}`.slice(0, 500),
+    detail: `${at} 에 알림을 닫았어요`,
+    kind: bubbleKind(s.status),
+    sticky: true,
+    group: REMIND_GROUP,
+    buttons: [...(blocked ? SESSION_BUTTONS : sessionButtons("done")), { key: "mute", label: "이 세션은 그만" }],
+    ref: herdrRef({ pane: s.pane, ...(m ? { machine: m } : {}) }),
+    source: paneSource(a, m),
+  };
+};
+// 묶음 필드(group)를 모르는 예전 데몬이면 빼고 다시
+async function postGrouped(body) {
+  if (await bus("/bubbles", body)) return true;
+  const { group: _g, groupSummary: _s, ...plain } = body;
+  return !!(await bus("/bubbles", plain));
+}
+const clearRemind = (id) => bus(`/bubbles/${encodeURIComponent(id.startsWith("ext:") ? id : `ext:${id}`)}/clear`);
+async function syncSummary() {
+  const list = [...shown.values()];
+  const kind = list.some((s) => s.status === "blocked") ? "warn" : "info";
+  const sig = list.length ? `${list.length}|${kind}` : "";
+  if (sig === summarySig) return;
+  summarySig = sig;
+  if (!list.length) return void (await clearRemind(SUMMARY_ID));
+  await postGrouped({ id: SUMMARY_ID, text: summaryText(list.length), kind, sticky: true, group: REMIND_GROUP, groupSummary: true, buttons: [{ key: "snooze", label: snoozeLabel(REMIND.snoozeMs) }], source: { label: "다시 알림", color: "gray" } });
+}
+async function hideAll() {
+  for (const s of shown.values()) await clearRemind(remindItemId(s.machine, s.pane));
+  shown.clear();
+  await syncSummary();
+}
+
+async function remindTick() {
+  const la = json(await run(["agent", "list"], 5000))?.result?.agents;
+  if (Array.isArray(la)) Object.assign(local, { agents: new Map(la.filter((a) => typeof a?.pane_id === "string").map((a) => [a.pane_id, a])), okAt: Date.now() });
+  const state = reminderState(readEvents());
+  const now = Date.now();
+  const live = new Map();
+  for (const s of state.sessions.values()) {
+    const st = liveAgent(s.machine, s.pane)?.status;
+    if (st !== undefined) live.set(s.key, st); // 끝난 걸 보면 herdr 가 idle 로 — 본 것
+  }
+  const plan = digestPlan(state, now, REMIND, live, { quiet: await quietNow() });
+  if (!remindStarted) { // 다리를 다시 켬: 아직 떠 있을 줄을 이어받고, 나머지 예전 줄은 걷는다
+    remindStarted = true;
+    const keep = stillShown(state, plan.alive);
+    for (const k of state.everReminded) if (!keep.some((s) => s.key === k)) { const [m, pane] = k.split("|"); await clearRemind(remindItemId(m, pane)); }
+    for (const s of keep) shown.set(s.key, s);
+    summarySig = "?";
+  }
+  if (state.snoozeUntil > now && shown.size) return hideAll();
+  for (const [k, s] of shown) if (!plan.alive.has(k)) { shown.delete(k); await clearRemind(remindItemId(s.machine, s.pane)); }
+  if (plan.round?.length) {
+    const keys = new Set(plan.round.map((s) => s.key));
+    for (const [k, s] of shown) if (!keys.has(k)) { shown.delete(k); await clearRemind(remindItemId(s.machine, s.pane)); }
+    summarySig = "?"; // 머리를 먼저(묶음으로 받게) — 새로 알릴 때는 같은 글이어도 다시
+    for (const s of plan.round) shown.set(s.key, s);
+    await syncSummary();
+    for (const s of plan.round) {
+      await postGrouped(remindBody(s));
+      logEvent("remind", { action: "shown", machine: s.machine, pane: s.pane, status: s.status });
+    }
+    logEvent("remind", { action: "digest", n: plan.round.length });
+    note(`remind: ${plan.round.length} sessions (${plan.round.map((s) => `${s.key}:${s.status}`).join(",")})`);
+  } else if (summarySig === "?") {
+    await syncSummary();
+    for (const s of shown.values()) await postGrouped(remindBody(s)); // 이어받은 줄은 같은 id 로 다시(기록은 안 함)
+  }
+  await syncSummary();
+}
+
+// [1시간 뒤에](머리)·[이 세션은 그만](줄) — 처리했으면 true. [세션으로 가기]·[답하기]는 보통 길로
+async function remindAction(id, key, ref) {
+  if (id === `ext:${SUMMARY_ID}` && key === "snooze") {
+    const until = Date.now() + REMIND.snoozeMs;
+    logEvent("remind", { action: "snooze", until });
+    await hideAll();
+    await result(id, true);
+    return true;
+  }
+  const r = typeof ref === "string" ? parseHerdrRef(ref) : null;
+  if (key === "mute" && r) {
+    const k = sessionKey(r.machine, r.pane);
+    logEvent("remind", { action: "mute", machine: r.machine ?? "local", pane: r.pane });
+    shown.delete(k);
+    await result(id, true);
+    await clearRemind(id);
+    await syncSummary();
+    return true;
+  }
+  return false;
+}
+
+// 묶음 줄·머리가 닫힘: 사용자가 닫았으면 이번 묶음에서 뺀다(다음 때 다시). 머리를 닫으면(모두 닫기) 다 뺀다. 우리가 걷은 것(cleared)은 그대로
+async function remindClosed(id, reason, r) {
+  if (reason === "cleared") return;
+  if (id === `ext:${SUMMARY_ID}`) {
+    for (const s of shown.values()) logEvent("remind", { action: "dismissed", machine: s.machine, pane: s.pane });
+    summarySig = "";
+    await hideAll();
+    return;
+  }
+  if (!r) return;
+  const k = sessionKey(r.machine, r.pane);
+  if (!shown.delete(k)) return;
+  logEvent("remind", { action: "dismissed", machine: r.machine ?? "local", pane: r.pane });
+  await syncSummary();
+}
+
+async function watchReminders() {
+  if (!REMIND.on) return note("bridge: reminders off");
+  for (;;) {
+    await remindTick().catch((e) => note(`remind error ${e.message}`));
+    await sleep(REMIND_TICK_MS);
+  }
+}
+
 // ---- 2) 다른 컴퓨터 감시 ----
 async function watchMachines() {
   let list = [], listAt = 0, sideAt = 0;
@@ -424,4 +614,5 @@ if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split("/").pop()
   note(`bridge start poll=${POLL_MS}ms`);
   listenActions();
   watchMachines();
+  watchReminders();
 }
