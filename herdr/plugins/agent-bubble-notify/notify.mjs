@@ -2,7 +2,7 @@
 // `node notify.mjs --test`(액션) → 지금 포커스된 pane 으로 시험 말풍선
 import { spawnSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { loadDotEnv, modeEnabled, envFlag, envInt, readJsonEnv, paneInfo, sessionName, bus, bubbleId, findTranscript, sessionSummary, sessionMaterial, note, swapPaneStatus, speak, SESSION_BUTTONS, herdrRef } from "./lib.mjs";
+import { loadDotEnv, modeEnabled, envFlag, envInt, readJsonEnv, paneInfo, sessionName, bus, bubbleId, findTranscript, sessionSummary, sessionMaterial, note, swapPaneStatus, speak, sessionButtons, herdrRef } from "./lib.mjs";
 
 loadDotEnv();
 const TEST = process.argv.includes("--test");
@@ -62,7 +62,7 @@ const res = await bus("/bubbles", {
   kind: blocked ? "info" : "done",
   ...(detail ? { detail: detail.slice(0, 1200) } : {}),
   ...(ttlSec === 0 ? { sticky: true } : { ttlMs: Math.min(Math.max(ttlSec, 1), 3600) * 1000 }),
-  buttons: SESSION_BUTTONS,
+  buttons: sessionButtons(status),
   ref: herdrRef({ pane, session }),
   ...(material ? { summarize: { state: blocked ? "blocked" : "done", title: title.slice(0, 200), material } } : {}),
 }, material ? 25000 : 3000);

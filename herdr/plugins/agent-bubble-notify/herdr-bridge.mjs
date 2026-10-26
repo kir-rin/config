@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { loadDotEnv, modeEnabled, envFlag, envInt, bus, note, speak, SESSION_BUTTONS, herdrRef, parseHerdrRef } from "./lib.mjs";
+import { loadDotEnv, modeEnabled, envFlag, envInt, bus, note, speak, sessionButtons, herdrRef, parseHerdrRef } from "./lib.mjs";
 
 loadDotEnv();
 const HERDR = process.env.HERDR_BIN_PATH || "herdr";
@@ -81,7 +81,7 @@ async function notify(m, a, state) {
     text: text.slice(0, 500),
     kind: blocked ? "info" : "done",
     ...(ttlSec === 0 ? { sticky: true } : { ttlMs: Math.min(Math.max(ttlSec, 1), 3600) * 1000 }),
-    buttons: SESSION_BUTTONS,
+    buttons: sessionButtons(state),
     ref: herdrRef({ pane, machine: m }),
     ...(material ? { summarize: { state: blocked ? "blocked" : "done", title: `${m} · ${title}`.slice(0, 200), material } } : {}),
   }, material ? 25000 : 3000);
@@ -126,18 +126,22 @@ async function poll(m) {
   }
 }
 
-// ---- 1) 말풍선 버튼 → 그 세션으로 ----
+// ---- 1) 말풍선 버튼 → 그 세션으로 · [답하기] → 그 세션에 보내기 ----
 
-// herdr 오류(출력의 JSON { error: { code } }) → 사용자에게 보일 말
-export function focusError(out) {
+// herdr 오류(출력의 JSON { error: { code } }) → 사용자에게 보일 말. fallback: 모르는 오류일 때
+export function focusError(out, fallback = "herdr 세션으로 가지 못했어요.") {
   let code = "";
   for (const line of String(out ?? "").split("\n")) {
     try { code = JSON.parse(line)?.error?.code ?? code; } catch { /* JSON 이 아닌 줄 */ }
   }
   if (code === "agent_not_found" || code === "pane_not_found") return "그 세션이 이미 닫혔어요.";
   if (code === "server_not_running") return "herdr 가 꺼져 있어요.";
-  return "herdr 세션으로 가지 못했어요.";
+  if (code === "agent_blocked") return "세션이 확인을 기다리고 있어요 — 세션에서 답해 주세요.";
+  return fallback;
 }
+
+// ref → herdr 대상 인자(이 컴퓨터 기본 세션이면 없음)
+export const targetArgs = (r) => (r.machine ? ["--machine", r.machine] : r.session ? ["--session", r.session] : []);
 
 // herdr 를 띄우는 터미널 앱. AGENT_BUBBLE_TERMINAL 이 있으면 그것, 없으면 돌고 있는 것 중 앞의 것
 const TERMINALS = [["WezTerm", "/WezTerm.app/"], ["Ghostty", "/Ghostty.app/"], ["iTerm", "/iTerm.app/"], ["kitty", "/kitty.app/"], ["Alacritty", "/Alacritty.app/"], ["Warp", "/Warp.app/"], ["Terminal", "/Terminal.app/"]];
@@ -230,8 +234,7 @@ async function showOnScreen(machine, workspace) {
 
 // 그 세션으로: herdr 서버에서 pane 포커스(워크스페이스·탭도) → 화면을 그 머신으로 → 터미널 앱을 앞으로. 못 가면 이유
 async function go(r) {
-  const target = r.machine ? ["--machine", r.machine] : r.session ? ["--session", r.session] : [];
-  const f = await runRaw(HERDR, [...target, "agent", "focus", r.pane], { timeout: 15000 });
+  const f = await runRaw(HERDR, [...targetArgs(r), "agent", "focus", r.pane], { timeout: 15000 });
   if (f.err) return focusError(f.out);
   const app = pickTerminal((await runRaw("ps", ["-axo", "comm"])).stdout, process.env.AGENT_BUBBLE_TERMINAL);
   if (app) await runRaw("open", ["-a", app]); // 못 띄워도 pane 은 옮겼다
@@ -240,18 +243,37 @@ async function go(r) {
   return null;
 }
 
+// [답하기]: 쓴 말을 그 세션에 프롬프트로(herdr agent prompt — 화면은 안 옮긴다). 셸 없이 인자로만, 저장 머신은 ssh 너머라 15초까지. 못 보내면 이유
+// herdr 는 세션이 입력 대기(blocked)면 아무것도 넣지 않고 agent_blocked 로 거절한다
+async function prompt(r, text) {
+  const f = await runRaw(HERDR, [...targetArgs(r), "agent", "prompt", r.pane, text], { timeout: 15000 });
+  return f.err ? focusError(f.out, "세션에 보내지 못했어요.") : null;
+}
+
+// bubble-action → 할 일: default = 가기, reply(+ text) = 보내기. 모르는 key·이상한 ref 면 null. 순수 함수
+export function actionPlan({ key, ref, text }) {
+  const r = typeof ref === "string" ? parseHerdrRef(ref) : null;
+  if (!r) return null;
+  if (key === "default") return { kind: "go", r };
+  const t = typeof text === "string" ? text.trim() : "";
+  if (key === "reply" && t && t.length <= 2000) return { kind: "reply", r, text: t };
+  return null;
+}
+
 // 우리(herdr 플러그인)가 띄운 말풍선인가 — id 가 ext:herdr: 로 시작. 아니면 다른 프로그램 몫이라 건드리지 않는다
 const ours = (id) => typeof id === "string" && id.startsWith("ext:herdr:");
 const inflight = new Set(); // 처리 중인 말풍선 id — 겹쳐 누르면 사이드바 키가 두 번 들어간다
 
-async function onAction({ id, key, ref }) {
+async function onAction({ id, key, ref, text }) {
   if (!ours(id) || inflight.has(id)) return;
-  const r = key === "default" && typeof ref === "string" ? parseHerdrRef(ref) : null;
+  const plan = actionPlan({ key, ref, text });
+  const r = plan?.r;
   inflight.add(id);
   try {
-    const err = r ? await go(r) : "이 알림은 어디로 가야 할지 몰라요.";
-    note(`action ${id} → ${r ? `${r.machine ? `${r.machine}/` : ""}${r.pane}` : "?"} ${err ?? "ok"}`);
-    // 갔으면 걷는다 — 그사이 같은 id 로 새 알림이 왔으면(ref 가 다르면) 그건 둔다
+    const err = !plan ? "이 알림은 어디로 가야 할지 몰라요." : plan.kind === "reply" ? await prompt(r, plan.text) : await go(r);
+    // 보낸 말은 기록에 남기지 않는다(길이만)
+    note(`action ${id} ${key} → ${r ? `${r.machine ? `${r.machine}/` : ""}${r.pane}` : "?"}${plan?.kind === "reply" ? ` text=${plan.text.length}자` : ""} ${err ?? "ok"}`);
+    // 갔으면(보냈으면) 걷는다 — 그사이 같은 id 로 새 알림이 왔으면(ref 가 다르면) 그건 둔다
     if (!err) return void (await bus(`/bubbles/${encodeURIComponent(id)}/clear`, { ifRef: ref }));
     // 못 갔으면 같은 말풍선을 이유로 바꾼다(버튼 없이, 잠깐)
     await bus("/bubbles", { id, text: err, kind: "error", ttlMs: 8000 });

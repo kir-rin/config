@@ -101,6 +101,10 @@ export const bubbleId = (pane) => `herdr:${pane}`;
 // herdr-bridge.mjs 가 ref 를 읽어 그 세션으로 간다. ref = JSON { h: 1, pane, session?, machine?, t } (200자 안쪽)
 // t: 보낸 때 — 같은 id 로 새 알림이 오면 ref 가 달라져, 늦게 끝난 처리가 새 알림을 걷지 않는다(clear ifRef)
 export const SESSION_BUTTONS = [{ key: "default", label: "세션으로 가기" }];
+// 끝난(done) 세션엔 [답하기]도 — 말풍선 입력줄에 쓴 말을 bubble-action text 로 받아 herdr agent prompt 로 그 세션에 보낸다(가지 않고).
+// 입력 대기(blocked)는 대개 도구 승인 메뉴라 글자가 엉뚱한 선택지를 고를 수 있어 [세션으로 가기]만. AGENT_BUBBLE_REPLY=off 로 끈다
+export const REPLY_BUTTON = { key: "reply", label: "답하기", input: { placeholder: "세션에 보낼 말" } };
+export const sessionButtons = (status) => (status === "done" && envFlag("AGENT_BUBBLE_REPLY", true) ? [...SESSION_BUTTONS, REPLY_BUTTON] : SESSION_BUTTONS);
 export const herdrRef = ({ pane, session, machine }) => JSON.stringify({ h: 1, pane, ...(machine ? { machine } : session ? { session } : {}), t: Date.now() });
 export function parseHerdrRef(ref) {
   let r;
