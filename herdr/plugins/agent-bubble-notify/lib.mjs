@@ -1,7 +1,8 @@
 // 공용: .env 읽기 · 켜짐 상태 · herdr 호출 · AgentBot 버스 호출. agent-telegram-notify(herdr-plugin-examples) 구조를 따른다
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
-import { dirname, join } from "node:path";
+import { hostname } from "node:os";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const pluginRoot = dirname(fileURLToPath(import.meta.url));
@@ -113,6 +114,51 @@ export function parseHerdrRef(ref) {
   if (r?.h !== 1 || typeof r.pane !== "string" || !/^[A-Za-z0-9][\w:.-]{0,63}$/.test(r.pane)) return null;
   if (!ok(r.session, /^[A-Za-z0-9][\w.-]{0,63}$/) || !ok(r.machine, /^[A-Za-z0-9][\w .-]{0,63}$/)) return null;
   return { pane: r.pane, ...(r.machine ? { machine: r.machine } : r.session ? { session: r.session } : {}) };
+}
+
+// ---- 머리줄(source): 「● [컴퓨터 칩] 프로젝트 · agent」 — 오래 올리면 경로·탭 제목·pane ----
+// 같은 컴퓨터는 어느 맥의 캐릭터에서 보든 같은 이름·색이어야 한다 → AGENT_BUBBLE_MACHINE_NAMES 로 맞춘다(양쪽 .env 에 같은 줄)
+export const SOURCE_COLORS = ["blue", "purple", "green", "orange", "pink", "gray"];
+const HASH_COLORS = ["purple", "green", "orange", "pink"]; // 이 컴퓨터 기본(blue)과 안 겹치게
+
+// "home:집:blue,company:회사:purple,local:집:blue" → Map(소문자 key → { name?, color? }). key = 저장 머신 label·local(이 컴퓨터)·짧은 호스트 이름
+export function parseMachineNames(s) {
+  const m = new Map();
+  for (const part of String(s ?? "").split(",")) {
+    const [key, name, color] = part.split(":").map((x) => x.trim());
+    if (!key) continue;
+    m.set(key.toLowerCase(), { ...(name ? { name: name.slice(0, 40) } : {}), ...(SOURCE_COLORS.includes(color) ? { color } : {}) });
+  }
+  return m;
+}
+
+// 이름 → 늘 같은 색(매핑이 없을 때 저장 머신)
+export function hashColor(label) {
+  let h = 0;
+  for (const c of String(label)) h = (h * 31 + c.codePointAt(0)) >>> 0;
+  return HASH_COLORS[h % HASH_COLORS.length];
+}
+
+// 칩: machine 이 없으면 이 컴퓨터 — 이름은 AGENT_BUBBLE_SOURCE_LABEL → 매핑(local·호스트 이름) → 짧은 호스트 이름, 색은 매핑 → blue.
+// 저장 머신은 매핑(label) → label 그대로, 색은 매핑 → hashColor
+export function machineSource(machine, { names = parseMachineNames(process.env.AGENT_BUBBLE_MACHINE_NAMES), host = hostname().split(".")[0], own = process.env.AGENT_BUBBLE_SOURCE_LABEL?.trim() } = {}) {
+  if (machine) {
+    const m = names.get(machine.toLowerCase()) ?? {};
+    return { label: (m.name ?? machine).slice(0, 40), color: m.color ?? hashColor(machine) };
+  }
+  const m = names.get("local") ?? names.get(String(host).toLowerCase()) ?? {};
+  return { label: (own || m.name || host || "local").slice(0, 40), color: m.color ?? "blue" };
+}
+
+// pane 정보(herdr pane get·agent list 한 줄) → source. 제목: 붙인 이름(label·name) → 작업 폴더 이름 → 탭 제목 → pane, 그리고 · agent.
+// 탭 제목(Claude Code 는 대화 요약)은 길어서 detail 로
+export function paneSource(info, machine, opts) {
+  const cwd = String(info?.foreground_cwd || info?.cwd || "").replace(/\/+$/, "");
+  const name = info?.label || info?.name || (cwd ? basename(cwd) : "") || info?.terminal_title_stripped || info?.pane_id || "";
+  const agent = info?.agent && info.agent !== name ? info.agent : "";
+  const title = [name, agent].filter(Boolean).join(" · ").slice(0, 80);
+  const detail = [cwd, info?.terminal_title_stripped, info?.pane_id ? `${machine ? `${machine} ` : ""}${info.pane_id}` : ""].filter(Boolean).join("\n").slice(0, 500);
+  return { ...machineSource(machine, opts), ...(title ? { title } : {}), ...(detail ? { detail } : {}) };
 }
 
 // ---- 요약: 그 pane 의 Claude Code 세션 기록(JSONL)에서 ----

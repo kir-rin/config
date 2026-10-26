@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { loadDotEnv, modeEnabled, envFlag, envInt, bus, note, speak, sessionButtons, herdrRef, parseHerdrRef } from "./lib.mjs";
+import { loadDotEnv, modeEnabled, envFlag, envInt, bus, note, speak, sessionButtons, herdrRef, parseHerdrRef, paneSource } from "./lib.mjs";
 
 loadDotEnv();
 const HERDR = process.env.HERDR_BIN_PATH || "herdr";
@@ -83,6 +83,7 @@ async function notify(m, a, state) {
     ...(ttlSec === 0 ? { sticky: true } : { ttlMs: Math.min(Math.max(ttlSec, 1), 3600) * 1000 }),
     buttons: sessionButtons(state),
     ref: herdrRef({ pane, machine: m }),
+    source: paneSource(a, m),
     ...(material ? { summarize: { state: blocked ? "blocked" : "done", title: `${m} · ${title}`.slice(0, 200), material } } : {}),
   }, material ? 25000 : 3000);
   note(`[${m}] ${pane} bubble ${res ? "sent" : "FAILED"} ${state} material=${material ? material.length : 0} line=${res?.text ? JSON.stringify(res.text) : "-"}`);
