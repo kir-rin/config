@@ -15,6 +15,9 @@ const HERDR = process.env.HERDR_BIN_PATH || "herdr";
 const POLL_MS = Math.max(envInt("AGENT_BUBBLE_MACHINE_POLL_MS", 5000), 2000);
 const REBASE_MS = 5 * 60e3; // 이만큼 못 물었으면 다시 붙을 때 그사이 끝난 것들을 한꺼번에 띄우지 않고 지금 상태만 받아 둔다
 const LIST_MS = 60e3;
+// 사이드바 차례(이 컴퓨터·저장 머신 워크스페이스 목록)는 미리 받아 둔다 — 누를 때 ssh 를 기다리지 않게(회사→집 8–10초)
+const SIDEBAR_MS = Math.max(envInt("AGENT_BUBBLE_SIDEBAR_REFRESH_MS", 30000), 5000);
+const SIDEBAR_STALE_MS = Math.max(envInt("AGENT_BUBBLE_SIDEBAR_STALE_MS", 180000), SIDEBAR_MS);
 
 // 실패하면 null(err 를 알고 싶으면 runRaw)
 const runRaw = (file, args, opts = {}) => new Promise((resolve) => {
@@ -192,6 +195,46 @@ export function navSteps(order, from, to) {
 
 // prefix → w → ↓/↑ × n → Enter
 export const navKeys = (prefix, steps) => [prefix, "w", ...Array(Math.abs(steps)).fill(steps > 0 ? "\x1b[B" : "\x1b[A"), "\r"];
+// 한 번에 보낼 글(send-text 한 번) — 키마다 쉬면 선택이 따라락 움직이고 그사이 친 글자가 끼어든다. herdr 0.9.5 는 한 덩어리로 받아도 그대로 따른다
+export const navBurst = (prefix, steps) => navKeys(prefix, steps).join("");
+
+// ---- 사이드바 차례 캐시: machine('' = 이 컴퓨터) → { ws: [{ workspace, focused }] | null(못 받음), at } ----
+const sidebar = new Map();
+let saved = { list: [], at: 0 }; // 켜 둔 저장 머신(machine list 차례)
+export const cacheFresh = (entry, now, maxAge) => !!entry && now - entry.at <= maxAge;
+// 사이드바 차례([{ machine, workspace, focused }]): 이 컴퓨터 → 저장 머신 차례로. fresh(방금 받은 것)가 캐시보다 먼저, 못 받은 머신은 빠진다(사이드바에서도 빠진다)
+export function sidebarOrder(machines, cache, fresh = new Map()) {
+  return machines.flatMap((m) => {
+    const ws = (fresh.get(m) ?? cache.get(m))?.ws;
+    return Array.isArray(ws) ? ws.map((w) => ({ machine: m, workspace: w.workspace, focused: !!w.focused })) : [];
+  });
+}
+async function fetchWorkspaces(machine) {
+  const out = await run([...(machine ? ["--machine", machine] : []), "workspace", "list"], machine ? 15000 : 5000);
+  const ws = json(out)?.result?.workspaces;
+  const entry = { ws: Array.isArray(ws) ? ws.map((w) => ({ workspace: w.workspace_id, focused: !!w.focused })) : null, at: Date.now() };
+  sidebar.set(machine, entry);
+  return entry;
+}
+async function savedMachines() {
+  const list = json(await run(["machine", "list", "--json"], 5000));
+  if (!Array.isArray(list)) return null;
+  const on = list.filter((m) => m?.enabled !== false);
+  saved = { list: on.map((m) => m.label), at: Date.now() };
+  return { saved: saved.list, on: on.find((m) => m.selected)?.label ?? "" };
+}
+// 뒤에서 늘: 저장 머신 목록 + 머신마다 워크스페이스(원격은 15초까지)
+let refreshing = false;
+async function refreshSidebar() {
+  if (refreshing) return;
+  refreshing = true;
+  try {
+    await savedMachines();
+    await Promise.all(["", ...saved.list].map(fetchWorkspaces));
+  } finally {
+    refreshing = false;
+  }
+}
 
 // wezterm cli list 의 pane 중 herdr 화면(클라이언트)이 도는 것: `ps -axo pid,tty,comm` 에서 터미널(tty)에 붙은 herdr 의 tty 로. 없으면 null
 // (herdr 서버·브리지는 tty 가 없다(??), herdr 안 pane 의 herdr 명령은 herdr 의 tty 라 WezTerm pane 과 안 겹친다)
@@ -204,11 +247,19 @@ export function clientPane(panes, psText) {
   return (Array.isArray(panes) ? panes : []).find((p) => ttys.has(p?.tty_name))?.pane_id ?? null;
 }
 
-// herdr 화면을 그 머신(이 컴퓨터는 '')의 그 워크스페이스로. 이미 거기면 그대로. 못 하면 false
-async function showOnScreen(machine, workspace) {
-  const machines = (json(await run(["machine", "list", "--json"], 5000)) ?? []).filter((m) => m?.enabled !== false);
-  const on = machines.find((m) => m.selected)?.label ?? "";
-  if (on === machine && !machine) return true; // 이 컴퓨터를 보고 있다 — agent focus 가 이미 옮겼다
+// 지금 화면: 어느 머신을 보고 있나(machine list 의 selected — 이 컴퓨터라 빠르다) + 그 머신의 워크스페이스(지금 칸을 알려고 늘 새로).
+// 그 세션으로 가는 agent focus 와 같이 돌린다(그 머신이 원격이면 ssh 를 기다리는 시간이 겹친다)
+async function screenState() {
+  const m = await savedMachines();
+  if (!m) return null;
+  return { ...m, here: await fetchWorkspaces(m.on) };
+}
+
+// herdr 화면을 그 머신(이 컴퓨터는 '')의 그 워크스페이스로. 이미 그 머신을 보고 있으면 그대로(agent focus 가 이미 옮겼다). 못 하면 false
+async function showOnScreen(machine, workspace, screenP) {
+  const screen = await screenP;
+  if (!screen) return false;
+  if (screen.on === machine) return true;
   const wz = ["/opt/homebrew/bin/wezterm", "/usr/local/bin/wezterm", "/Applications/WezTerm.app/Contents/MacOS/wezterm"].find((p) => existsSync(p));
   const gui = (await runRaw("pgrep", ["-x", "wezterm-gui"])).stdout.trim().split("\n")[0];
   const sock = gui && join(homedir(), ".local", "share", "wezterm", `gui-sock-${gui}`);
@@ -219,32 +270,28 @@ async function showOnScreen(machine, workspace) {
   try { config = readFileSync(join(homedir(), ".config", "herdr", "config.toml"), "utf8"); } catch { /* 기본 prefix */ }
   const prefix = prefixBytes(config);
   if (pane === null || !prefix) return false;
-  // 사이드바 차례: 이 컴퓨터 워크스페이스 → 켜 둔 저장 머신 차례로(닿지 않는 머신은 사이드바 이동에서도 빠진다)
-  // 저장 머신은 ssh 너머라 느리다(회사→집 8–10초) — agent focus 처럼 15초까지 기다린다
-  const lists = await Promise.all([
-    run(["workspace", "list"], 5000).then((o) => ({ machine: "", ws: json(o)?.result?.workspaces })),
-    ...machines.map((m) => run(["--machine", m.label, "workspace", "list"], 15000).then((o) => ({ machine: m.label, ws: json(o)?.result?.workspaces }))),
-  ]);
-  const order = lists.filter((l) => Array.isArray(l.ws)).flatMap((l) => l.ws.map((w) => ({ machine: l.machine, workspace: w.workspace_id, focused: !!w.focused })));
-  const from = order.find((o) => o.machine === on && o.focused);
+  // 사이드바 차례: 이 컴퓨터 워크스페이스 → 켜 둔 저장 머신 차례로. 뒤에서 받아 둔 것을 쓰고, 오래된(SIDEBAR_STALE_MS) 것만 지금 받는다
+  const machines = ["", ...screen.saved];
+  const now = Date.now();
+  await Promise.all(machines.filter((m) => m !== screen.on && !cacheFresh(sidebar.get(m), now, SIDEBAR_STALE_MS)).map(fetchWorkspaces));
+  const order = sidebarOrder(machines, sidebar, new Map([[screen.on, screen.here]]));
+  const from = order.find((o) => o.machine === screen.on && o.focused);
   const steps = from ? navSteps(order, from, { machine, workspace }) : null;
   if (steps === null) return false;
   if (steps === 0) return true;
-  for (const key of navKeys(prefix, steps)) {
-    await runRaw(wz, ["cli", "send-text", "--no-paste", "--pane-id", String(pane), key], wzOpts);
-    await sleep(60);
-  }
+  await runRaw(wz, ["cli", "send-text", "--no-paste", "--pane-id", String(pane), navBurst(prefix, steps)], wzOpts);
   return true;
 }
 
 // 그 세션으로: herdr 서버에서 pane 포커스(워크스페이스·탭도) → 화면을 그 머신으로 → 터미널 앱을 앞으로. 못 가면 이유
 async function go(r) {
+  const screenP = r.session ? null : screenState().catch(() => null); // 화면 상태는 focus 와 같이(원격이면 ssh 시간이 겹친다)
   const f = await runRaw(HERDR, [...targetArgs(r), "agent", "focus", r.pane], { timeout: 15000 });
   if (f.err) return focusError(f.out);
   const app = pickTerminal((await runRaw("ps", ["-axo", "comm"])).stdout, process.env.AGENT_BUBBLE_TERMINAL);
   if (app) await runRaw("open", ["-a", app]); // 못 띄워도 pane 은 옮겼다
   if (r.session) return null; // 이름 붙은 세션은 따로 붙은 화면 — 사이드바 이동은 안 한다
-  if (!(await showOnScreen(r.machine ?? "", r.pane.split(":")[0]))) return `세션은 골라 뒀어요. herdr 사이드바에서 ${r.machine ?? "Local"} 로 가 주세요.`;
+  if (!(await showOnScreen(r.machine ?? "", r.pane.split(":")[0], screenP))) return `세션은 골라 뒀어요. herdr 사이드바에서 ${r.machine ?? "Local"} 로 가 주세요.`;
   return null;
 }
 
@@ -359,8 +406,9 @@ async function listenActions() {
 
 // ---- 2) 다른 컴퓨터 감시 ----
 async function watchMachines() {
-  let list = [], listAt = 0;
+  let list = [], listAt = 0, sideAt = 0;
   for (;;) {
+    if (Date.now() - sideAt > SIDEBAR_MS) { sideAt = Date.now(); refreshSidebar().catch(() => {}); } // 기다리지 않는다
     if (Date.now() - listAt > LIST_MS) {
       const got = await machines();
       if (got.join() !== list.join()) note(`bridge: machines=${got.join(",") || "-"}`);

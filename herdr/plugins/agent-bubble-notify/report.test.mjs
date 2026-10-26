@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseMachineNames } from "./lib.mjs";
-import { machineChanges, enqueueAction } from "./herdr-bridge.mjs";
+import { machineChanges, enqueueAction, cacheFresh, sidebarOrder, navSteps, navBurst } from "./herdr-bridge.mjs";
 import { parseNotifyLine, backfillEvents, machineCanon, sessionMachine, dedupEvents, dropOverlap, pairWaits, concurrencyStats, percentile, bubbleMix, mixStats, buildReport } from "./metrics.mjs";
 
 const NAMES = parseMachineNames("home:집:blue,company:회사:purple,local:집:blue");
@@ -205,4 +205,19 @@ test("bridge 누름 줄: 겹쳐 눌러도 버리지 않고 차례대로 — 같�
   assert.deepEqual(q.queue.map((x) => x.kind), ["reply", "reply", "go"]); // 가기는 하나만, 끝에
   assert.deepEqual(enqueueAction([], go, go), { queue: [], collapsed: true }); // 가는 중에 또 가기
   assert.deepEqual(enqueueAction([], null, go).queue, [go]);
+});
+
+test("bridge 사이드바 캐시: 신선도 · 차례(이 컴퓨터 → 저장 머신, 방금 받은 것 먼저, 못 받은 머신은 빠짐) · 키는 한 번에", () => {
+  assert.equal(cacheFresh(undefined, 1000, 500), false);
+  assert.equal(cacheFresh({ at: 600 }, 1000, 500), true);
+  assert.equal(cacheFresh({ at: 499 }, 1000, 500), false);
+  const ws = (...ids) => ({ ws: ids.map((w, i) => ({ workspace: w, focused: i === 0 })), at: 0 });
+  const cache = new Map([["", ws("w1", "w2")], ["home", ws("h1", "h2", "h3")], ["windows", { ws: null, at: 0 }]]);
+  const fresh = new Map([["home", { ws: [{ workspace: "h1" }, { workspace: "h2", focused: true }, { workspace: "h3" }], at: 1 }]]);
+  const order = sidebarOrder(["", "home", "windows", "nope"], cache, fresh);
+  assert.deepEqual(order.map((o) => `${o.machine}/${o.workspace}${o.focused ? "*" : ""}`), ["/w1*", "/w2", "home/h1", "home/h2*", "home/h3"]);
+  const from = order.find((o) => o.machine === "home" && o.focused);
+  assert.equal(navSteps(order, from, { machine: "", workspace: "w1" }), -3);
+  assert.equal(navBurst("\x02", -3), "\x02w\x1b[A\x1b[A\x1b[A\r");
+  assert.equal(navBurst("\x02", 2), "\x02w\x1b[B\x1b[B\r");
 });
