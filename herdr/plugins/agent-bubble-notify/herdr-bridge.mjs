@@ -267,25 +267,57 @@ export function actionPlan({ key, ref, text }) {
 
 // 우리(herdr 플러그인)가 띄운 말풍선인가 — id 가 ext:herdr: 로 시작. 아니면 다른 프로그램 몫이라 건드리지 않는다
 const ours = (id) => typeof id === "string" && id.startsWith("ext:herdr:");
-const inflight = new Set(); // 처리 중인 말풍선 id — 겹쳐 누르면 사이드바 키가 두 번 들어간다
+
+// 말풍선(세션)마다 누름 줄 — 겹쳐 누르면 버리지 않고 차례대로(사이드바 키가 겹쳐 들어가지 않게 하나씩). 순수 함수:
+// 답(reply)은 다 차례대로, 바로 앞(기다리는 것 또는 지금 하는 것)과 같은 글이면 하나로 · 가기(go)는 마지막 것만(기다리던 가기는 버림, 지금 가는 중이면 더 안 넣음)
+// → { queue, collapsed }(collapsed = 이번 누름은 합쳐졌다)
+export function enqueueAction(queue, running, item) {
+  const same = (x) => x && x.kind === item.kind && (x.kind !== "reply" || x.text === item.text);
+  if (item.kind === "go") {
+    const rest = queue.filter((x) => x.kind !== "go");
+    if (!rest.length && same(running)) return { queue: rest, collapsed: true };
+    return { queue: [...rest, item], collapsed: false };
+  }
+  if (same(queue.at(-1) ?? running)) return { queue, collapsed: true };
+  return { queue: [...queue, item], collapsed: false };
+}
+
+const lanes = new Map(); // 말풍선 id → { queue, running }
+
+// 처리 결과를 앱에 알린다(POST /bubbles/:id/result — 오버레이·폰 누름 줄이 다음 것을 보낸다). 예전 데몬이면 null
+const result = (id, ok, note) => bus(`/bubbles/${encodeURIComponent(id)}/result`, { ok, ...(note ? { note: note.slice(0, 200) } : {}) });
 
 async function onAction({ id, key, ref, text }) {
-  if (!ours(id) || inflight.has(id)) return;
+  if (!ours(id)) return;
   const plan = actionPlan({ key, ref, text });
-  const r = plan?.r;
-  inflight.add(id);
+  const lane = lanes.get(id) ?? { queue: [], running: null };
+  lanes.set(id, lane);
+  const item = plan ? { ...plan, id, key, ref } : { kind: "bad", id, key, ref };
+  const q = enqueueAction(lane.queue, lane.running, item);
+  lane.queue = q.queue;
+  if (q.collapsed) { note(`action ${id} ${key} collapsed`); await result(id, true); return; }
+  if (lane.running) return; // 앞 것이 끝나면 이어서
   try {
-    const err = !plan ? "이 알림은 어디로 가야 할지 몰라요." : plan.kind === "reply" ? await prompt(r, plan.text) : await go(r);
-    // 보낸 말은 기록에 남기지 않는다(길이만)
-    logEvent("action", { machine: r?.machine ?? "local", ...(r ? { pane: r.pane } : {}), id, key, ok: !err, ...(err ? { error: err } : {}), ...(plan?.kind === "reply" ? { replyLen: plan.text.length } : {}) });
-    note(`action ${id} ${key} → ${r ? `${r.machine ? `${r.machine}/` : ""}${r.pane}` : "?"}${plan?.kind === "reply" ? ` text=${plan.text.length}자` : ""} ${err ?? "ok"}`);
-    // 갔으면(보냈으면) 걷는다 — 그사이 같은 id 로 새 알림이 왔으면(ref 가 다르면) 그건 둔다
-    if (!err) return void (await bus(`/bubbles/${encodeURIComponent(id)}/clear`, { ifRef: ref }));
-    // 못 갔으면 같은 말풍선을 이유로 바꾼다(버튼 없이, 잠깐)
-    await bus("/bubbles", { id, text: err, kind: "error", ttlMs: 8000 });
+    while (lane.queue.length) {
+      lane.running = lane.queue.shift();
+      await runAction(lane.running);
+    }
   } finally {
-    inflight.delete(id);
+    lane.running = null;
+    if (!lane.queue.length) lanes.delete(id);
   }
+}
+
+async function runAction({ id, key, ref, kind, r, text }) {
+  const err = kind === "bad" ? "이 알림은 어디로 가야 할지 몰라요." : kind === "reply" ? await prompt(r, text) : await go(r);
+  // 보낸 말은 기록에 남기지 않는다(길이만)
+  logEvent("action", { machine: r?.machine ?? "local", ...(r ? { pane: r.pane } : {}), id, key, ok: !err, ...(err ? { error: err } : {}), ...(kind === "reply" ? { replyLen: text.length } : {}) });
+  note(`action ${id} ${key} → ${r ? `${r.machine ? `${r.machine}/` : ""}${r.pane}` : "?"}${kind === "reply" ? ` text=${text.length}자` : ""} ${err ?? "ok"}`);
+  const told = await result(id, !err, err ?? undefined);
+  // 갔으면(보냈으면) 걷는다 — 그사이 같은 id 로 새 알림이 왔으면(ref 가 다르면) 그건 둔다
+  if (!err) return void (await bus(`/bubbles/${encodeURIComponent(id)}/clear`, { ifRef: ref }));
+  // 못 갔는데 예전 데몬(결과 길 없음)이면 같은 말풍선을 이유로 바꾼다(버튼 없이, 잠깐)
+  if (!told) await bus("/bubbles", { id, text: err, kind: "error", ttlMs: 8000 });
 }
 
 // 말풍선이 닫힘(bubble-closed { id, reason: dismissed|expired|cleared, ref? }) → 리포트 재료. ref 로 머신·pane 을 되찾는다

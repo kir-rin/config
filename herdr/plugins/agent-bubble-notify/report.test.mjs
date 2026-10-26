@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseMachineNames } from "./lib.mjs";
-import { machineChanges } from "./herdr-bridge.mjs";
+import { machineChanges, enqueueAction } from "./herdr-bridge.mjs";
 import { parseNotifyLine, backfillEvents, machineCanon, sessionMachine, dedupEvents, dropOverlap, pairWaits, concurrencyStats, percentile, bubbleMix, mixStats, buildReport } from "./metrics.mjs";
 
 const NAMES = parseMachineNames("home:집:blue,company:회사:purple,local:집:blue");
@@ -187,4 +187,22 @@ test("buildReport: 두 맥 합쳐 하루 집계(중복 하나)", () => {
   assert.equal(r.total.blockedWaitMs, 20e3);
   assert.equal(r.total.concurrency.max, 2);
   assert.equal(r.days.length, 1);
+});
+
+test("bridge 누름 줄: 겹쳐 눌러도 버리지 않고 차례대로 — 같은 글은 하나로, 가기는 마지막 것만", () => {
+  const reply = (text) => ({ kind: "reply", text });
+  const go = { kind: "go" };
+  let q = enqueueAction([], reply("하나"), reply("하나"));
+  assert.deepEqual(q, { queue: [], collapsed: true }); // 지금 보내는 것과 같은 글
+  q = enqueueAction([], reply("하나"), reply("둘"));
+  assert.deepEqual(q.queue.map((x) => x.text), ["둘"]);
+  q = enqueueAction(q.queue, reply("하나"), reply("둘"));
+  assert.equal(q.collapsed, true);
+  q = enqueueAction(q.queue, reply("하나"), reply("하나")); // 바로 앞이 아니면 또 보낸다
+  assert.deepEqual(q.queue.map((x) => x.text), ["둘", "하나"]);
+  q = enqueueAction(q.queue, reply("하나"), go);
+  q = enqueueAction(q.queue, reply("하나"), go);
+  assert.deepEqual(q.queue.map((x) => x.kind), ["reply", "reply", "go"]); // 가기는 하나만, 끝에
+  assert.deepEqual(enqueueAction([], go, go), { queue: [], collapsed: true }); // 가는 중에 또 가기
+  assert.deepEqual(enqueueAction([], null, go).queue, [go]);
 });
