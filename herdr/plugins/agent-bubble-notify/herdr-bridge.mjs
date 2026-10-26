@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { loadDotEnv, modeEnabled, envFlag, envInt, bus, note, speak, sessionButtons, herdrRef, parseHerdrRef, paneSource, bubbleKind, bubbleLife } from "./lib.mjs";
+import { loadDotEnv, modeEnabled, envFlag, envInt, bus, note, speak, sessionButtons, herdrRef, parseHerdrRef, paneSource, bubbleKind, bubbleLife, machineBubbleId, logEvent } from "./lib.mjs";
 
 loadDotEnv();
 const HERDR = process.env.HERDR_BIN_PATH || "herdr";
@@ -32,15 +32,14 @@ async function machines() {
   return rows.filter((m) => m?.enabled !== false && m?.label).map((m) => m.label);
 }
 
-// 말풍선 id 에 넣을 머신 이름: 영숫자·_.- 밖의 글자는 _<코드> 로(서로 다른 이름이 같은 id 가 되지 않게)
-const slug = (m) => m.replace(/[^A-Za-z0-9.-]/g, (c) => `_${c.codePointAt(0).toString(16)}`);
-export const machineBubbleId = (m, pane) => `herdr:${slug(m)}:${pane}`;
+export { machineBubbleId }; // lib.mjs 로 옮김(backfill 도 쓴다)
 
 // 직전(prev: pane → {status, seq, focused})과 지금 목록 → 알릴 것·걷을 것. 순수 함수
 // done: 끝남(done 으로 바뀜, done 인데 그사이 다시 돌았음 = seq 바뀜, 보이는 pane 이라 working → idle)
 // blocked: 입력 대기로 바뀜. 걷기: 다시 돎·대기였다가 idle·사용자가 그 pane 으로 감(focused)·pane 사라짐
+// 리포트 재료: transitions(상태가 바뀜 — 물은 사이 한 바퀴 돌아 같은 상태면 missed, 사라지면 to: gone)·focused(그 pane 으로 감)
 export function machineChanges(prev, agents) {
-  const notify = [], clear = [], next = new Map();
+  const notify = [], clear = [], next = new Map(), transitions = [], focused = [];
   for (const a of agents) {
     const pane = a?.pane_id;
     if (typeof pane !== "string") continue;
@@ -49,13 +48,16 @@ export function machineChanges(prev, agents) {
     const p = prev.get(pane);
     if (!p) continue; // 처음 본 pane 은 받아만 둔다
     const moved = p.seq !== now.seq;
+    if (p.status !== now.status) transitions.push({ pane, agent: a.agent, from: p.status, to: now.status });
+    else if (moved && (now.status === "done" || now.status === "blocked")) transitions.push({ pane, agent: a.agent, from: p.status, to: now.status, missed: true });
+    if (now.focused && !p.focused) focused.push(pane);
     if (now.status === "done" && (p.status !== "done" || moved)) notify.push({ agent: a, state: "done" });
     else if (now.status === "idle" && p.status === "working") notify.push({ agent: a, state: "done" });
     else if (now.status === "blocked" && (p.status !== "blocked" || moved)) notify.push({ agent: a, state: "blocked" });
     else if ((now.status === "working" && p.status !== "working") || (now.status === "idle" && p.status === "blocked") || (now.focused && !p.focused)) clear.push(pane);
   }
-  for (const pane of prev.keys()) if (!next.has(pane)) clear.push(pane);
-  return { notify, clear, next };
+  for (const [pane, p] of prev) if (!next.has(pane)) { clear.push(pane); transitions.push({ pane, from: p.status, to: "gone" }); }
+  return { notify, clear, next, transitions, focused };
 }
 
 // 캐릭터 한 줄 재료: 그 pane 화면 끝(세션 기록 파일은 그 머신에 있어 못 읽는다)
@@ -85,6 +87,7 @@ async function notify(m, a, state) {
     source: paneSource(a, m),
     ...(material ? { summarize: { state: blocked ? "blocked" : "done", title: `${m} · ${title}`.slice(0, 200), material } } : {}),
   }, material ? 25000 : 3000);
+  if (res) logEvent("shown", { machine: m, pane, agent: a.agent, id: `ext:${machineBubbleId(m, pane)}`, kind: bubbleKind(state), buttons: sessionButtons(state).map((b) => b.key) });
   note(`[${m}] ${pane} bubble ${res ? "sent" : "FAILED"} ${state} material=${material ? material.length : 0} line=${res?.text ? JSON.stringify(res.text) : "-"}`);
   speak(state, res?.text || text);
 }
@@ -108,7 +111,7 @@ async function poll(m) {
       return;
     }
     const stale = !w.prev || Date.now() - w.okAt > REBASE_MS;
-    const { notify: todo, clear, next } = machineChanges(stale ? new Map() : w.prev, agents);
+    const { notify: todo, clear, next, transitions, focused } = machineChanges(stale ? new Map() : w.prev, agents);
     if (stale) {
       note(`[${m}] baseline ${next.size} panes`);
       if (w.prev) for (const pane of w.prev.keys()) if (!next.has(pane)) clear.push(pane); // 끊긴 사이 닫힌 pane 의 말풍선
@@ -116,6 +119,8 @@ async function poll(m) {
     w.prev = next;
     w.okAt = Date.now();
     w.backoff = 0;
+    for (const t of transitions) logEvent("status", { machine: m, ...t });
+    for (const pane of focused) logEvent("focus", { machine: m, pane });
     for (const pane of clear) clearBubble(m, pane);
     for (const { agent, state } of todo) {
       note(`[${m}] ${agent.pane_id} event=${state}`);
@@ -272,6 +277,7 @@ async function onAction({ id, key, ref, text }) {
   try {
     const err = !plan ? "이 알림은 어디로 가야 할지 몰라요." : plan.kind === "reply" ? await prompt(r, plan.text) : await go(r);
     // 보낸 말은 기록에 남기지 않는다(길이만)
+    logEvent("action", { machine: r?.machine ?? "local", ...(r ? { pane: r.pane } : {}), id, key, ok: !err, ...(err ? { error: err } : {}), ...(plan?.kind === "reply" ? { replyLen: plan.text.length } : {}) });
     note(`action ${id} ${key} → ${r ? `${r.machine ? `${r.machine}/` : ""}${r.pane}` : "?"}${plan?.kind === "reply" ? ` text=${plan.text.length}자` : ""} ${err ?? "ok"}`);
     // 갔으면(보냈으면) 걷는다 — 그사이 같은 id 로 새 알림이 왔으면(ref 가 다르면) 그건 둔다
     if (!err) return void (await bus(`/bubbles/${encodeURIComponent(id)}/clear`, { ifRef: ref }));
@@ -282,7 +288,14 @@ async function onAction({ id, key, ref, text }) {
   }
 }
 
-// GET /events?actions=1 을 붙잡고 bubble-action 만 받는다. 끊기면 3초 뒤 다시
+// 말풍선이 닫힘(bubble-closed { id, reason: dismissed|expired|cleared, ref? }) → 리포트 재료. ref 로 머신·pane 을 되찾는다
+function onClosed({ id, reason, ref }) {
+  if (!ours(id)) return;
+  const r = typeof ref === "string" ? parseHerdrRef(ref) : null;
+  logEvent("closed", { machine: r?.machine ?? "local", ...(r ? { pane: r.pane } : {}), id, reason });
+}
+
+// GET /events?actions=1 을 붙잡고 bubble-action·bubble-closed 만 받는다. 끊기면 3초 뒤 다시
 async function listenActions() {
   const base = (process.env.AGENT_BUBBLE_URL || "http://127.0.0.1:47891").replace(/\/+$/, "");
   for (;;) {
@@ -300,10 +313,11 @@ async function listenActions() {
           buf = buf.slice(i + 2);
           const ev = frame.match(/^event: (.+)$/m)?.[1];
           const data = frame.match(/^data: (.+)$/m)?.[1];
-          if (ev !== "bubble-action" || !data) continue;
+          if ((ev !== "bubble-action" && ev !== "bubble-closed") || !data) continue;
           let p;
           try { p = JSON.parse(data); } catch { continue; }
-          onAction(p).catch((e) => note(`action error ${e.message}`));
+          if (ev === "bubble-closed") onClosed(p);
+          else onAction(p).catch((e) => note(`action error ${e.message}`));
         }
       }
     } catch { /* 앱이 꺼져 있다 — 다시 */ }

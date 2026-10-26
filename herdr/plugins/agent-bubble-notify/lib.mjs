@@ -1,11 +1,18 @@
 // 공용: .env 읽기 · 켜짐 상태 · herdr 호출 · AgentBot 버스 호출. agent-telegram-notify(herdr-plugin-examples) 구조를 따른다
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
-import { hostname } from "node:os";
+import { homedir, hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const pluginRoot = dirname(fileURLToPath(import.meta.url));
+export const PLUGIN_ID = "yh.agent-bubble-notify";
+
+// 손으로 돌리는 스크립트(report·backfill)용: herdr 가 안 넣어 준 설정·상태 폴더를 기본 자리로(herdr-bridge-install.sh 와 같다)
+export function defaultDirs() {
+  process.env.HERDR_PLUGIN_CONFIG_DIR ||= join(homedir(), ".config", "herdr", "plugins", "config", PLUGIN_ID);
+  process.env.HERDR_PLUGIN_STATE_DIR ||= join(homedir(), ".local", "state", "herdr", "plugins", PLUGIN_ID);
+}
 
 // HERDR_PLUGIN_CONFIG_DIR/.env → 플러그인 폴더/.env 순. 이미 있는 환경 변수는 안 덮는다
 export function loadDotEnv() {
@@ -97,6 +104,9 @@ export async function bus(path, body, timeoutMs = 3000) {
 }
 
 export const bubbleId = (pane) => `herdr:${pane}`;
+// 다른 컴퓨터 세션 말풍선 id. 머신 이름의 영숫자·_.- 밖의 글자는 _<코드> 로(서로 다른 이름이 같은 id 가 되지 않게)
+const slug = (m) => m.replace(/[^A-Za-z0-9.-]/g, (c) => `_${c.codePointAt(0).toString(16)}`);
+export const machineBubbleId = (m, pane) => `herdr:${slug(m)}:${pane}`;
 
 // 말풍선 버튼과 ref: AgentBot 은 herdr 를 모른다 — 본문·[세션으로 가기]를 누르면 데몬이 bubble-action { id, key, ref } 를 SSE 로 내보내고,
 // herdr-bridge.mjs 가 ref 를 읽어 그 세션으로 간다. ref = JSON { h: 1, pane, session?, machine?, t } (200자 안쪽)
@@ -280,6 +290,30 @@ export function note(msg) {
     if (existsSync(f) && statSync(f).size > 200 * 1024) writeFileSync(f, "");
     appendFileSync(f, `${new Date().toISOString()} ${msg}\n`);
   } catch { /* 기록 못 해도 알림은 그대로 */ }
+}
+
+// ---- 구조화 기록(생산성 리포트 재료): HERDR_PLUGIN_STATE_DIR/events.jsonl, 한 줄 = JSON 하나 ----
+// 공통 { ts, type, viewer(이 컴퓨터 이름), machine(세션 머신 label · 이 컴퓨터 pane 은 local), pane?, agent? } + 종류별 필드.
+// 보낸 말·말풍선 글은 안 남긴다(길이만). 한 줄 = appendFileSync 한 번(여러 훅이 동시에 써도 줄이 안 섞인다).
+// 20MB 넘으면 events.jsonl.1 로 넘긴다. AGENT_BUBBLE_EVENTS=off 로 끈다
+const EVENTS_MAX = 20 * 1024 * 1024;
+let ownLabel;
+export const selfLabel = () => (ownLabel ??= machineSource(undefined).label);
+export function logEvent(type, fields = {}) {
+  const dir = process.env.HERDR_PLUGIN_STATE_DIR;
+  if (!dir || !envFlag("AGENT_BUBBLE_EVENTS", true)) return;
+  const f = join(dir, "events.jsonl");
+  try {
+    if (existsSync(f) && statSync(f).size > EVENTS_MAX) rotateEvents(f);
+    appendFileSync(f, `${JSON.stringify({ ts: new Date().toISOString(), type, viewer: selfLabel(), machine: "local", ...fields })}\n`);
+  } catch { /* 기록 못 해도 알림은 그대로 */ }
+}
+// 넘기기는 한 프로세스만(mkdir 잠금 — 둘이 동시에 넘기면 큰 .1 을 새 작은 파일로 덮는다). 1분 넘은 잠금은 죽은 것
+function rotateEvents(f) {
+  const lock = `${f}.lock`;
+  try { if (Date.now() - statSync(lock).mtimeMs > 60e3) rmdirSync(lock); } catch { /* 잠금 없음 */ }
+  try { mkdirSync(lock); } catch { return; }
+  try { if (statSync(f).size > EVENTS_MAX) renameSync(f, `${f}.1`); } finally { rmdirSync(lock); }
 }
 
 // pane 마다 직전 상태(working → idle 을 「끝남」으로 보려고): HERDR_PLUGIN_STATE_DIR/panes/<pane>.

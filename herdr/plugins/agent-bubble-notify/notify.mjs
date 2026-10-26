@@ -2,7 +2,7 @@
 // `node notify.mjs --test`(액션) → 지금 포커스된 pane 으로 시험 말풍선
 import { spawnSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { loadDotEnv, modeEnabled, envFlag, envInt, readJsonEnv, paneInfo, sessionName, bus, bubbleId, findTranscript, sessionSummary, sessionMaterial, note, swapPaneStatus, speak, sessionButtons, herdrRef, paneSource, bubbleKind, bubbleLife } from "./lib.mjs";
+import { loadDotEnv, modeEnabled, envFlag, envInt, readJsonEnv, paneInfo, sessionName, bus, bubbleId, findTranscript, sessionSummary, sessionMaterial, note, swapPaneStatus, speak, sessionButtons, herdrRef, paneSource, bubbleKind, bubbleLife, logEvent } from "./lib.mjs";
 
 loadDotEnv();
 const TEST = process.argv.includes("--test");
@@ -18,6 +18,9 @@ let status = TEST ? "done" : String(event?.data?.agent_status ?? "").toLowerCase
 // 화면에 보이는 pane(같은 탭의 분할 등)은 끝나도 herdr 가 「본 것」으로 쳐서 done 이 아니라 바로 idle 이 온다 → working 다음 idle 도 끝남으로
 // 꺼 둔 동안에도 상태는 적는다 — 다시 켰을 때 묵은 working 으로 엉뚱한 말풍선이 뜨지 않게
 const prev = TEST ? undefined : swapPaneStatus(pane, status);
+// 리포트 재료: 상태 바뀜은 꺼 둔 동안에도(말풍선을 안 건드려도 사람이 답한 때가 여기 남는다). to 는 herdr 그대로 — working → idle 을 끝남으로 보는 건 리포트가
+const agent = event?.data?.display_agent ?? event?.data?.agent ?? undefined;
+if (!TEST) logEvent("status", { pane, agent, from: prev ?? null, to: status });
 if (!TEST && !modeEnabled()) process.exit(0);
 note(`${pane} event=${status}${prev ? ` prev=${prev}` : ""}${TEST ? " (test)" : ""}`);
 if (status === "idle" && prev === "working") status = "done";
@@ -65,6 +68,7 @@ const res = await bus("/bubbles", {
   source: paneSource({ pane_id: pane, ...info }),
   ...(material ? { summarize: { state: blocked ? "blocked" : "done", title: title.slice(0, 200), material } } : {}),
 }, material ? 25000 : 3000);
+if (res && !TEST) logEvent("shown", { pane, agent: info.agent ?? agent, id: `ext:${bubbleId(pane)}`, kind: bubbleKind(status), buttons: sessionButtons(status).map((b) => b.key) });
 note(`${pane} bubble ${res ? "sent" : "FAILED"} ${status} material=${material ? material.length : 0} line=${res?.text ? JSON.stringify(res.text) : "-"}`);
 
 // 읽기: 캐릭터 한 줄이 나왔으면 그 줄, 아니면 처음 글
