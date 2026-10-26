@@ -104,6 +104,20 @@ export const bubbleId = (pane) => `herdr:${pane}`;
 export const SESSION_BUTTONS = [{ key: "default", label: "세션으로 가기" }];
 // 끝난(done) 세션엔 [답하기]도 — 말풍선 입력줄에 쓴 말을 bubble-action text 로 받아 herdr agent prompt 로 그 세션에 보낸다(가지 않고).
 // 입력 대기(blocked)는 대개 도구 승인 메뉴라 글자가 엉뚱한 선택지를 고를 수 있어 [세션으로 가기]만. AGENT_BUBBLE_REPLY=off 로 끈다
+// 말풍선 종류: 입력 대기(blocked)는 warn(확인 필요 — AgentBot 묶음에서 먼저), 끝남은 done
+export const bubbleKind = (status) => (status === "blocked" ? "warn" : "done");
+
+// 유지 시간: AGENT_BUBBLE_TTL_DONE·_BLOCKED(초, 1–86400)를 주면 그대로. 0(기본)이면 누를 때까지(sticky) —
+// 다만 끝난 알림은 AGENT_BUBBLE_DONE_MAX_AGE_MIN(분, 기본 120, 0 = 끔, 최대 1440) 뒤 저절로 치운다. 입력 대기는 안 치운다
+export function bubbleLife(status, env = process.env) {
+  const num = (name, d) => { const n = Number(env[name]); return env[name]?.trim() && Number.isFinite(n) && n >= 0 ? n : d; };
+  const blocked = status === "blocked";
+  const ttl = num(blocked ? "AGENT_BUBBLE_TTL_BLOCKED" : "AGENT_BUBBLE_TTL_DONE", 0);
+  if (ttl > 0) return { ttlMs: Math.round(Math.min(Math.max(ttl, 1), 86400) * 1000) };
+  const age = blocked ? 0 : num("AGENT_BUBBLE_DONE_MAX_AGE_MIN", 120);
+  return age > 0 ? { ttlMs: Math.round(Math.min(age, 1440) * 60e3) } : { sticky: true };
+}
+
 export const REPLY_BUTTON = { key: "reply", label: "답하기", input: { placeholder: "세션에 보낼 말" } };
 export const sessionButtons = (status) => (status === "done" && envFlag("AGENT_BUBBLE_REPLY", true) ? [...SESSION_BUTTONS, REPLY_BUTTON] : SESSION_BUTTONS);
 export const herdrRef = ({ pane, session, machine }) => JSON.stringify({ h: 1, pane, ...(machine ? { machine } : session ? { session } : {}), t: Date.now() });

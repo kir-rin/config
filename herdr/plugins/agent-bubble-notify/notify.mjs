@@ -2,7 +2,7 @@
 // `node notify.mjs --test`(액션) → 지금 포커스된 pane 으로 시험 말풍선
 import { spawnSync } from "node:child_process";
 import { setTimeout as sleep } from "node:timers/promises";
-import { loadDotEnv, modeEnabled, envFlag, envInt, readJsonEnv, paneInfo, sessionName, bus, bubbleId, findTranscript, sessionSummary, sessionMaterial, note, swapPaneStatus, speak, sessionButtons, herdrRef, paneSource } from "./lib.mjs";
+import { loadDotEnv, modeEnabled, envFlag, envInt, readJsonEnv, paneInfo, sessionName, bus, bubbleId, findTranscript, sessionSummary, sessionMaterial, note, swapPaneStatus, speak, sessionButtons, herdrRef, paneSource, bubbleKind, bubbleLife } from "./lib.mjs";
 
 loadDotEnv();
 const TEST = process.argv.includes("--test");
@@ -45,8 +45,6 @@ const title = info.label || info.terminal_title_stripped || info.agent || pane;
 const fill = (tpl) => tpl.replaceAll("{title}", title).replaceAll("{agent}", info.agent ?? "agent");
 const blocked = status === "blocked";
 const text = fill(process.env[blocked ? "AGENT_BUBBLE_TEXT_BLOCKED" : "AGENT_BUBBLE_TEXT_DONE"] || (blocked ? "⚠️ {title} 확인이 필요해요" : "✅ {title} 끝났어요"));
-// 유지 시간(초): 0 = 누를 때까지 남김. 그 밖은 1–3600
-const ttlSec = envInt(blocked ? "AGENT_BUBBLE_TTL_BLOCKED" : "AGENT_BUBBLE_TTL_DONE", 0);
 const session = sessionName();
 const transcript = transcriptOf(info);
 // 캐릭터 한 줄(AGENT_BUBBLE_CHARACTER_LINE): 데몬이 지금 캐릭터 말투로 한 문장을 만들어 같은 말풍선을 바꾼다 — 그동안 보일 짧은 요약만 본문에
@@ -59,9 +57,9 @@ const detail = transcript && envFlag("AGENT_BUBBLE_SUMMARY", true)
 const res = await bus("/bubbles", {
   id: bubbleId(pane),
   text: text.slice(0, 500),
-  kind: blocked ? "info" : "done",
+  kind: bubbleKind(status),
   ...(detail ? { detail: detail.slice(0, 1200) } : {}),
-  ...(ttlSec === 0 ? { sticky: true } : { ttlMs: Math.min(Math.max(ttlSec, 1), 3600) * 1000 }),
+  ...bubbleLife(status), // 끝난 알림은 AGENT_BUBBLE_DONE_MAX_AGE_MIN 뒤 저절로
   buttons: sessionButtons(status),
   ref: herdrRef({ pane, session }),
   source: paneSource({ pane_id: pane, ...info }),

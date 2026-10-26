@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { loadDotEnv, modeEnabled, envFlag, envInt, bus, note, speak, sessionButtons, herdrRef, parseHerdrRef, paneSource } from "./lib.mjs";
+import { loadDotEnv, modeEnabled, envFlag, envInt, bus, note, speak, sessionButtons, herdrRef, parseHerdrRef, paneSource, bubbleKind, bubbleLife } from "./lib.mjs";
 
 loadDotEnv();
 const HERDR = process.env.HERDR_BIN_PATH || "herdr";
@@ -73,14 +73,13 @@ async function notify(m, a, state) {
   const title = a.label || a.terminal_title_stripped || a.name || a.agent || pane;
   const fill = (tpl) => tpl.replaceAll("{title}", title).replaceAll("{agent}", a.agent ?? "agent");
   const text = `[${m}] ${fill(process.env[blocked ? "AGENT_BUBBLE_TEXT_BLOCKED" : "AGENT_BUBBLE_TEXT_DONE"] || (blocked ? "⚠️ {title} 확인이 필요해요" : "✅ {title} 끝났어요"))}`;
-  const ttlSec = envInt(blocked ? "AGENT_BUBBLE_TTL_BLOCKED" : "AGENT_BUBBLE_TTL_DONE", 0);
   const tail = envFlag("AGENT_BUBBLE_CHARACTER_LINE", true) ? await screenTail(m, pane) : null;
   const material = tail ? `[터미널 화면 끝 — ${m} 컴퓨터]\n${tail}` : null;
   const res = await bus("/bubbles", {
     id: machineBubbleId(m, pane),
     text: text.slice(0, 500),
-    kind: blocked ? "info" : "done",
-    ...(ttlSec === 0 ? { sticky: true } : { ttlMs: Math.min(Math.max(ttlSec, 1), 3600) * 1000 }),
+    kind: bubbleKind(state),
+    ...bubbleLife(state),
     buttons: sessionButtons(state),
     ref: herdrRef({ pane, machine: m }),
     source: paneSource(a, m),
