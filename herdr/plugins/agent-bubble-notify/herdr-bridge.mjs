@@ -211,9 +211,10 @@ async function showOnScreen(machine, workspace) {
   const prefix = prefixBytes(config);
   if (pane === null || !prefix) return false;
   // 사이드바 차례: 이 컴퓨터 워크스페이스 → 켜 둔 저장 머신 차례로(닿지 않는 머신은 사이드바 이동에서도 빠진다)
+  // 저장 머신은 ssh 너머라 느리다(회사→집 8–10초) — agent focus 처럼 15초까지 기다린다
   const lists = await Promise.all([
     run(["workspace", "list"], 5000).then((o) => ({ machine: "", ws: json(o)?.result?.workspaces })),
-    ...machines.map((m) => run(["--machine", m.label, "workspace", "list"], 5000).then((o) => ({ machine: m.label, ws: json(o)?.result?.workspaces }))),
+    ...machines.map((m) => run(["--machine", m.label, "workspace", "list"], 15000).then((o) => ({ machine: m.label, ws: json(o)?.result?.workspaces }))),
   ]);
   const order = lists.filter((l) => Array.isArray(l.ws)).flatMap((l) => l.ws.map((w) => ({ machine: l.machine, workspace: w.workspace_id, focused: !!w.focused })));
   const from = order.find((o) => o.machine === on && o.focused);
