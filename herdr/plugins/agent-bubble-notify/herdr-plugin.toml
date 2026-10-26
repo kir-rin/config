@@ -8,19 +8,19 @@ platforms = ["macos"]
 [[actions]]
 id = "toggle"
 title = "Toggle agent bubble notify"
-command = ["node", "toggle.mjs"]
+command = ["sh", "node.sh", "toggle.mjs"]
 
 [[actions]]
 id = "test"
 title = "Agent bubble notify: send a test bubble for the focused pane"
-command = ["node", "notify.mjs", "--test"]
+command = ["sh", "node.sh", "notify.mjs", "--test"]
 
 # done/blocked → 소리 + 말풍선, working → 그 pane 말풍선 걷기
 [[events]]
 on = "pane.agent_status_changed"
-command = ["node", "notify.mjs"]
+command = ["sh", "node.sh", "notify.mjs"]
 
 # 그 pane 을 직접 보러 가면 말풍선 걷기
 [[events]]
 on = "pane.focused"
-command = ["node", "clear.mjs"]
+command = ["sh", "node.sh", "clear.mjs"]
