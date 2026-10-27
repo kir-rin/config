@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   remindConfig, fetchRemindPref, prefCache, newTracker, applyEvent, applyEvents, applyLive, reminderState, stepStatus, markShown,
-  firstDue, nextDue, digestPlan, stillShown, ownVisible, ownBubbleId, remindDetail, remindItemId, SUMMARY_ID, DEFAULT_EVERY_MIN, DEFAULT_DONE_MAX,
+  firstDue, nextDue, digestPlan, stillShown, ownVisible, ownBubbleId, remindMeta, metaFallback, agoText, postWithFallback, quietKeep, remindItemId, SUMMARY_ID, DEFAULT_EVERY_MIN, DEFAULT_DONE_MAX,
 } from "./remind.mjs";
 import { machineBubbleId } from "./lib.mjs";
 
@@ -173,11 +173,145 @@ test("다리를 다시 켬: 알렸고 그 뒤 안 닫은 줄만 아직 떠 있�
   assert.deepEqual(stillShown(tr, new Set(["local|a", "local|b"])).map((s) => s.key), ["local|a"]);
   assert.deepEqual([...tr.everReminded].sort(), ["local|a", "local|b"]);
   const s = tr.sessions.get("local|b");
-  assert.match(remindDetail(s, CFG), /^\d\d:\d\d 부터 기다려요 · 다시 알림 2\/3$/);
-  assert.match(remindDetail(tr.sessions.get("local|a"), CFG), /확인을 기다려요 · 2번째/);
+  assert.deepEqual(remindMeta(s, CFG), { since: at(0), text: "{ago} 기다려요 · 다시 알림 2/3" });
+  assert.deepEqual(remindMeta(tr.sessions.get("local|a"), CFG), { since: at(0), text: "{ago} 확인을 기다려요 · 2번째 다시 알림" });
   assert.equal(remindItemId("local", "w4:p3"), "herdr:_remind:local:w4:p3");
   assert.equal(SUMMARY_ID, "herdr:_remind");
   const x = { phase: null, raw: undefined, at: -Infinity };
   stepStatus(x, "idle", at(0));
   assert.equal(x.phase, null);
+});
+
+test("끝남 N번 뒤: 다시 알리지는 않고(셈·round 없음) 묶음 줄로 조용히 남는다 · 다른 세션 때문에 묶음이 새로 떠도 빠지지 않는다", () => {
+  const evs = [
+    ev(0, "status", { pane: "d", from: "working", to: "done" }),
+    ...[3, 6, 9].map((m) => ev(m, "remind", { action: "shown", pane: "d" })),
+    ev(10, "status", { pane: "e", from: "working", to: "done" }), // 나중에 끝난 다른 세션
+  ];
+  const tr = reminderState(evs);
+  const d = tr.sessions.get("local|d");
+  assert.equal(d.reminded, 3);
+  assert.equal(nextDue(d, CFG), null); // 더는 안 알린다
+  assert.ok(quietKeep(d, CFG));
+  assert.equal(digestPlan(tr, at(12), CFG).round, null); // d 만으로는 묶음이 다시 안 뜬다
+  assert.ok(digestPlan(tr, at(12), CFG).alive.has("local|d")); // 떠 있는 줄은 그대로 둔다
+  const p = digestPlan(tr, at(13), CFG); // e 가 때가 됨
+  assert.deepEqual(p.round.map((s) => s.key), ["local|e"]); // 알리는(세는) 건 e 뿐
+  assert.deepEqual(p.quiet.map((s) => s.key), ["local|d"]); // d 는 조용히 같이 남는다
+  for (const s of p.round) markShown(tr, s, at(13));
+  assert.equal(d.reminded, 3); // d 는 세지 않는다
+  // 몇 시간 뒤에도(e 가 계속 되풀이) d 는 남는다
+  for (const m of [16, 19]) { // e 의 2·3번째
+    const q = digestPlan(tr, at(m), CFG);
+    assert.deepEqual([q.round.map((s) => s.key), q.quiet.map((s) => s.key)], [["local|e"], ["local|d"]], `${m}분`);
+    for (const s of q.round) markShown(tr, s, at(m));
+  }
+  assert.equal(d.reminded, 3);
+  // 둘 다 다 알림: 몇 시간 뒤에도 새로 안 뜨고(round 없음) 둘 다 떠 있는 줄로 남는다
+  for (const m of [22, 60, 240]) {
+    const q = digestPlan(tr, at(m), CFG);
+    assert.equal(q.round, null);
+    assert.deepEqual([...q.alive].sort(), ["local|d", "local|e"]);
+  }
+  // 그때 새 세션이 때가 되면 둘 다 조용히 같이
+  applyEvent(tr, ev(250, "status", { pane: "f", from: "working", to: "done" }));
+  const late = digestPlan(tr, at(253), CFG);
+  assert.deepEqual([late.round.map((s) => s.key), late.quiet.map((s) => s.key)], [["local|f"], ["local|d", "local|e"]]);
+  // 블로킹은 그대로 — 계속 다시 알린다(조용히 남김 대상 아님)
+  const b = reminderState([ev(0, "status", { pane: "b", from: "working", to: "blocked" }), ...[3, 6, 9, 12, 15].map((m) => ev(m, "remind", { action: "shown", pane: "b" }))]);
+  const bs = b.sessions.get("local|b");
+  assert.equal(quietKeep(bs, CFG), false);
+  assert.deepEqual(digestPlan(b, at(18), CFG).round.map((s) => s.key), ["local|b"]);
+  assert.deepEqual(remindMeta(bs, CFG), { since: at(0), text: "{ago} 확인을 기다려요 · 6번째 다시 알림" });
+  // DONE_MAX 0 이면 끝남은 줄로도 안 남긴다(한 번도 안 알렸다)
+  assert.equal(quietKeep({ ...d, reminded: 0, lastRemindAt: null }, { ...CFG, doneMax: 0 }), false);
+});
+
+test("조용히 남은 줄이 빠지는 때: 답함·다시 돎·✕(줄 닫기)·머리 닫기·그만·세션 사라짐 · 미룸으로 걷힌 건 다음 묶음에 다시", () => {
+  const base = [
+    ev(0, "status", { pane: "d", from: "working", to: "done" }),
+    ...[3, 6, 9].map((m) => ev(m, "remind", { action: "shown", pane: "d" })),
+    ev(10, "status", { pane: "e", from: "working", to: "done" }),
+  ];
+  const quietAt = (extra, m = 13) => digestPlan(reminderState([...base, ...extra]), at(m), CFG).quiet.map((s) => s.key);
+  assert.deepEqual(quietAt([]), ["local|d"]);
+  assert.deepEqual(quietAt([ev(11, "action", { pane: "d", id: "ext:herdr:_remind:local:d", key: "reply", ok: true })]), []); // 답함
+  assert.deepEqual(quietAt([ev(11, "status", { pane: "d", from: "done", to: "working" })]), []); // 다시 돎
+  assert.deepEqual(quietAt([ev(11, "remind", { action: "dismissed", pane: "d" })]), []); // ✕ — 다시 안 넣는다
+  assert.deepEqual(quietAt([ev(11, "remind", { action: "mute", pane: "d" })]), []); // 그만
+  assert.deepEqual(quietAt([ev(11, "status", { pane: "d", to: "gone" })]), []); // 세션 사라짐
+  assert.equal(reminderState([...base, ev(11, "remind", { action: "mute", pane: "d" })]).sessions.get("local|d").muted, true);
+  // ✕ 를 아직 알리던 때(2번째 뒤) 눌렀으면 3번째 알림에서 다시 보이고, 그 뒤 조용히 남는다(닫은 건 그 묶음만)
+  const early = reminderState([ev(0, "status", { pane: "d", from: "working", to: "done" }), ev(3, "remind", { action: "shown", pane: "d" }), ev(6, "remind", { action: "shown", pane: "d" }), ev(7, "remind", { action: "dismissed", pane: "d" }), ev(9, "remind", { action: "shown", pane: "d" })]);
+  assert.ok(quietKeep(early.sessions.get("local|d"), CFG));
+  // 미룸: 기간 동안 round 없음 → 끝나면 다음 묶음에 d 도 다시(미룸은 닫기가 아니다)
+  const sn = reminderState([...base, ev(11, "remind", { action: "snooze", until: at(71) })]);
+  assert.equal(digestPlan(sn, at(70), CFG).round, null);
+  assert.deepEqual(digestPlan(sn, at(71), CFG).quiet.map((s) => s.key), ["local|d"]);
+  // 다리를 다시 켬: 조용히 남던 줄도 이어받는다(닫은 건 아님)
+  const tr = reminderState(base);
+  assert.deepEqual(stillShown(tr, digestPlan(tr, at(12), CFG).alive).map((s) => s.key), ["local|d"]);
+});
+
+test("meta: { since, text } — text 에 {ago} 꼭 하나·80자 안 · 같은 세션은 알릴 때만 글이 바뀐다 · 끝남 N번째부터 「끝」 글 그대로", () => {
+  const d = { phase: "done", since: at(0), reminded: 0, lastRemindAt: null };
+  const texts = [];
+  for (const cfg of [CFG, { ...CFG, doneMax: 1 }, { ...CFG, doneMax: 99 }]) {
+    for (let n = 1; n <= cfg.doneMax + 2 && n < 6; n++) texts.push(remindMeta(d, cfg, n).text);
+  }
+  for (const n of [1, 2, 99]) texts.push(remindMeta({ ...d, phase: "blocked" }, CFG, n).text);
+  for (const t of texts) {
+    assert.equal(t.split("{ago}").length - 1, 1, t);
+    assert.ok(t.length >= 1 && t.length <= 80, t);
+  }
+  assert.equal(remindMeta(d, CFG, 1).text, "{ago} 기다려요 · 다시 알림 1/3");
+  assert.equal(remindMeta(d, CFG, 2).text, "{ago} 기다려요 · 다시 알림 2/3");
+  const last = remindMeta(d, CFG, 3).text;
+  assert.equal(last, "{ago} 기다려요 · 다시 알림 끝(3/3) · 답할 때까지 둘게요");
+  assert.equal(remindMeta({ ...d, reminded: 3 }, CFG, 3).text, last); // 조용히 남길 때·다시 보낼 때 — 같은 글(다시 뜬 걸로 안 보이게)
+  assert.equal(remindMeta({ ...d, reminded: 3 }, CFG).text, last); // 넘쳐도 그대로
+  assert.equal(remindMeta(d, CFG).since, at(0));
+  assert.ok(Number.isFinite(remindMeta(d, CFG).since) && remindMeta(d, CFG).since > 0);
+});
+
+test("지난 시간 글(앱 규칙과 같음): 방금 · N분째 · N시간 M분째(0분 뺌) · N일째 · 예전 데몬용 글", () => {
+  assert.deepEqual([0, 59e3, MIN, 12 * MIN + 30e3, 59 * MIN, 60 * MIN, 61 * MIN, 125 * MIN, 24 * 60 * MIN - 1, 24 * 60 * MIN, 50 * 60 * MIN, -5].map(agoText),
+    ["방금", "방금", "1분째", "12분째", "59분째", "1시간째", "1시간 1분째", "2시간 5분째", "23시간 59분째", "1일째", "2일째", "방금"]);
+  assert.equal(metaFallback({ since: at(0), text: "{ago} 기다려요 · 다시 알림 3/3" }, at(12)), "12분째 기다려요 · 다시 알림 3/3");
+});
+
+test("보내기: meta 를 받으면 그대로 · 예전 데몬(400 unknown field: meta)이면 meta 빼고 그때 지난 시간 글을 detail 로 · group 도 모르면 그것도 빼고 · 다른 실패는 그만", async () => {
+  const body = { id: "herdr:_remind:local:d", text: "✅ x 끝난 뒤 답이 없어요", kind: "done", sticky: true, group: "herdr-remind", buttons: [], meta: { since: at(0), text: "{ago} 기다려요 · 다시 알림 2/3" } };
+  const sent = [];
+  const newer = async (b) => { sent.push(b); return { ok: true, status: 201 }; };
+  assert.equal(await postWithFallback(newer, body, at(12)), true);
+  assert.deepEqual(sent, [body]);
+  // meta 만 모르는 데몬
+  const old = [];
+  const noMeta = async (b) => { old.push(b); return "meta" in b ? { ok: false, status: 400, error: '{"error":"unknown field: meta"}' } : { ok: true, status: 201 }; };
+  assert.equal(await postWithFallback(noMeta, body, at(12)), true);
+  assert.equal(old.length, 2);
+  assert.equal("meta" in old[1], false);
+  assert.equal(old[1].detail, "12분째 기다려요 · 다시 알림 2/3");
+  assert.equal(old[1].group, "herdr-remind"); // 다른 건 그대로
+  // group·meta 둘 다 모르는 더 옛 데몬(첫 모르는 필드만 말한다)
+  const older = [];
+  const oldest = async (b) => {
+    older.push(b);
+    const bad = ["group", "groupSummary", "meta"].find((k) => k in b);
+    return bad ? { ok: false, status: 400, error: `{"error":"unknown field: ${bad}"}` } : { ok: true, status: 201 };
+  };
+  assert.equal(await postWithFallback(oldest, body, at(65)), true);
+  assert.equal(older.length, 3);
+  assert.deepEqual(Object.keys(older[2]).sort(), ["buttons", "detail", "id", "kind", "sticky", "text"]);
+  assert.equal(older[2].detail, "1시간 5분째 기다려요 · 다시 알림 2/3");
+  // 꺼짐·다른 400 은 다시 안 보낸다
+  let n = 0;
+  assert.equal(await postWithFallback(async () => { n++; return { ok: false, status: 0, error: "ECONNREFUSED" }; }, body), false);
+  assert.equal(await postWithFallback(async () => { n++; return { ok: false, status: 400, error: '{"error":"text must be 1..500 chars"}' }; }, body), false);
+  assert.equal(n, 2);
+  // 데몬이 meta 모양을 거절해도(새 데몬의 검증) 같은 길
+  const v = [];
+  assert.equal(await postWithFallback(async (b) => { v.push(b); return b.meta ? { ok: false, status: 400, error: '{"error":"meta.text must contain {ago} exactly once"}' } : { ok: true }; }, body, at(3)), true);
+  assert.equal(v[1].detail, "3분째 기다려요 · 다시 알림 2/3");
 });

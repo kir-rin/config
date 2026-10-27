@@ -1,7 +1,7 @@
 // 답 안 한 세션 다시 알림 — 순수 함수(herdr-bridge.mjs 가 events.jsonl·지금 목록·데몬 설정을 넘긴다). 파일·네트워크는 fetchRemindPref 만(주입)
 // 「답 안 한 세션」: 아는 세션 전부(이 컴퓨터 herdr agent list + 다른 컴퓨터 poll) 중 입력 대기(blocked)거나 끝남(done — 끝난 뒤 봐서 idle 이 된 것도)인 채로
 // 간격 이상 지났고, 그 뒤로 다시 돌지(working) 않았고 답(reply)도 안 보낸 것. 끝난 걸 보기만(idle) 한 건 답이 아니다.
-// 간격마다 다시(끝남은 최대 N번, 입력 대기는 풀릴 때까지). 미룸·그만·방해 금지 시간이면 쉰다. 그 세션 말풍선이 아직 떠 있으면 묶음에 안 넣는다(떠 있는 게 이미 알림)
+// 간격마다 다시(끝남은 최대 N번, 입력 대기는 풀릴 때까지). 끝남 N번 뒤에도 묶음 줄로는 조용히 남긴다(답·닫기·그만·세션 사라짐까지). 미룸·그만·방해 금지 시간이면 쉰다. 그 세션 말풍선이 아직 떠 있으면 묶음에 안 넣는다(떠 있는 게 이미 알림)
 import { bubbleId, machineBubbleId } from "./lib.mjs";
 
 const MIN = 60e3;
@@ -186,27 +186,62 @@ export function nextDue(s, cfg) {
   return every ? Math.max(first, s.lastRemindAt + every) : null;
 }
 
+// 끝남 N번을 다 알렸고 그 뒤 닫지 않은 것 — 다시 알리지는 않고(세지도 않음) 묶음 줄로만 조용히 남긴다
+export const quietKeep = (s, cfg) => s.phase === "done" && !s.muted && cfg.doneMax > 0 && s.reminded >= cfg.doneMax && s.lastRemindAt !== null && !((s.hiddenAt ?? -1) >= s.lastRemindAt);
+
 // 지금 무엇을 보일까 → { alive: Set(key)(아직 답 안 했고 제 말풍선도 안 떠 있는 것 — 떠 있는 묶음에서 이것만 남긴다),
-//   round: null | [세션…](새로 알릴 때가 됐다 — 때가 된 게 하나라도 있으면 처음 때가 지난 것 전부, 입력 대기 먼저·오래 기다린 것 먼저) }
+//   round: null | [세션…](새로 알릴 때가 됐다 — 때가 된 게 하나라도 있으면 처음 때가 지난 것 전부, 입력 대기 먼저·오래 기다린 것 먼저),
+//   quiet: [세션…](round 가 있을 때 같이 묶음에 남길 끝남 N번 다 된 줄 — 알림·셈 없이) }
 // 꺼짐·방해 금지·미룸 동안은 round 없음
 export function digestPlan(tr, now, cfg, { quiet = false, liveIds = null } = {}) {
   const waiting = [...tr.sessions.values()].filter((s) => s.phase && !s.muted && !ownVisible(s, now, liveIds));
   const alive = new Set(waiting.map((s) => s.key));
-  if (!cfg.on || quiet || tr.snoozeUntil > now) return { alive, round: null };
-  if (!waiting.some((s) => { const d = nextDue(s, cfg); return d !== null && d <= now; })) return { alive, round: null };
-  const round = waiting.filter((s) => { const f = firstDue(s, cfg); return f !== null && f <= now && nextDue(s, cfg) !== null; })
-    .sort((a, b) => (a.phase === "blocked" ? 0 : 1) - (b.phase === "blocked" ? 0 : 1) || a.since - b.since);
-  return { alive, round };
+  if (!cfg.on || quiet || tr.snoozeUntil > now) return { alive, round: null, quiet: [] };
+  if (!waiting.some((s) => { const d = nextDue(s, cfg); return d !== null && d <= now; })) return { alive, round: null, quiet: [] };
+  const order = (a, b) => (a.phase === "blocked" ? 0 : 1) - (b.phase === "blocked" ? 0 : 1) || a.since - b.since;
+  const round = waiting.filter((s) => { const f = firstDue(s, cfg); return f !== null && f <= now && nextDue(s, cfg) !== null; }).sort(order);
+  return { alive, round, quiet: waiting.filter((s) => quietKeep(s, cfg)).sort(order) };
 }
 
 // 묶음 머리 글 · 미룸 단추
 export const summaryText = (n) => `답 안 한 세션 ${n}개`;
 export const snoozeLabel = (ms) => (ms % 3600e3 === 0 ? `${ms / 3600e3}시간 뒤에` : `${Math.round(ms / MIN)}분 뒤에`);
-// 줄 요약: 「14:05 부터 기다려요 · 다시 알림 2/3」(끝남) · 「14:05 부터 확인을 기다려요 · 3번째」(입력 대기)
-export function remindDetail(s, cfg, n = s.reminded + 1) {
-  const d = new Date(s.since);
-  const at = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  return s.phase === "blocked" ? `${at} 부터 확인을 기다려요 · ${n}번째 다시 알림` : `${at} 부터 기다려요 · 다시 알림 ${Math.min(n, cfg.doneMax)}/${cfg.doneMax}`;
+// 지난 시간 글(앱이 meta {ago} 를 바꾸는 규칙과 같다): 방금 · N분째 · N시간 M분째(0분은 뺀다) · N일째
+export function agoText(ms) {
+  const m = Math.floor(Math.max(0, ms) / MIN);
+  if (m < 1) return "방금";
+  if (m < 60) return `${m}분째`;
+  if (m < 24 * 60) return `${Math.floor(m / 60)}시간${m % 60 ? ` ${m % 60}분` : ""}째`;
+  return `${Math.floor(m / (24 * 60))}일째`;
+}
+// 줄 둘째 줄 meta { since, text }: 앱이 {ago} 를 since 부터 지난 시간으로 바꿔 계속 고친다(이 글은 알릴 때만 바뀐다 — 같은 글이면 다시 보내도 그대로).
+// 「{ago} 기다려요 · 다시 알림 2/3」(끝남) · 「… 다시 알림 끝(3/3) · 답할 때까지 둘게요」(끝남 N번째·그 뒤 조용히) · 「{ago} 확인을 기다려요 · 3번째 다시 알림」(입력 대기)
+export function remindMeta(s, cfg, n = s.reminded + 1) {
+  if (s.phase === "blocked") return { since: s.since, text: `{ago} 확인을 기다려요 · ${n}번째 다시 알림` };
+  const k = Math.min(n, cfg.doneMax);
+  return { since: s.since, text: k >= cfg.doneMax ? `{ago} 기다려요 · 다시 알림 끝(${k}/${cfg.doneMax}) · 답할 때까지 둘게요` : `{ago} 기다려요 · 다시 알림 ${k}/${cfg.doneMax}` };
+}
+// meta 를 모르는 예전 데몬용 글: 보낼 때 지난 시간으로(「12분째 기다려요 · …」 — 그 뒤로는 안 바뀐다)
+export const metaFallback = (meta, now) => meta.text.replace("{ago}", agoText(now - meta.since));
+
+// POST /bubbles 를 보내고, 예전 데몬이 모르는 필드로 400(unknown field: meta|group|groupSummary)이면 그것만 빼고 다시.
+// meta 를 빼면 그 글을 지금 때로 바꿔 detail 에 넣는다. post(body) → { ok, status, error } (lib busRaw)
+export async function postWithFallback(post, body, now = Date.now()) {
+  let b = body;
+  for (let i = 0; i < 4; i++) {
+    const r = await post(b);
+    if (r?.ok) return true;
+    if (r?.status !== 400) return false;
+    const e = String(r.error ?? "");
+    if (b.meta && /\bmeta\b/.test(e)) {
+      const { meta, ...rest } = b;
+      b = { ...rest, detail: metaFallback(meta, now) };
+    } else if ((b.group !== undefined || b.groupSummary !== undefined) && /\bgroup/.test(e)) {
+      const { group: _g, groupSummary: _s, ...rest } = b;
+      b = rest;
+    } else return false;
+  }
+  return false;
 }
 
 // 다리를 다시 켰을 때 아직 떠 있을 묶음 줄: 답 안 했고, 알린 적 있고, 그 뒤 닫지 않은 것

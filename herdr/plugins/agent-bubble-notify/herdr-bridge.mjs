@@ -10,9 +10,9 @@ import { closeSync, existsSync, openSync, readFileSync, readSync, statSync } fro
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { loadDotEnv, modeEnabled, envFlag, envInt, bus, note, speak, sessionButtons, herdrRef, parseHerdrRef, paneSource, bubbleKind, bubbleLife, machineBubbleId, logEvent, SESSION_BUTTONS, REPLY_BUTTON } from "./lib.mjs";
+import { loadDotEnv, modeEnabled, envFlag, envInt, bus, busRaw, note, speak, sessionButtons, herdrRef, parseHerdrRef, paneSource, bubbleKind, bubbleLife, machineBubbleId, logEvent, SESSION_BUTTONS, REPLY_BUTTON } from "./lib.mjs";
 import { parseEvents } from "./metrics.mjs";
-import { remindConfig, fetchRemindPref, prefCache, newTracker, applyEvents, applyLive, markShown, digestPlan, stillShown, isRemindId, remindItemId, sessionKey, summaryText, snoozeLabel, remindDetail, SUMMARY_ID, REMIND_GROUP } from "./remind.mjs";
+import { remindConfig, fetchRemindPref, prefCache, newTracker, applyEvents, applyLive, markShown, digestPlan, stillShown, isRemindId, remindItemId, sessionKey, summaryText, snoozeLabel, remindMeta, postWithFallback, SUMMARY_ID, REMIND_GROUP } from "./remind.mjs";
 
 loadDotEnv();
 const HERDR = process.env.HERDR_BIN_PATH || "herdr";
@@ -479,7 +479,8 @@ const tracker = newTracker();
 const shown = new Map(); // 떠 있는 묶음 줄: key → 세션
 let summarySig = "";
 let remindStarted = false;
-const remindBody = (s) => {
+// n = 줄에 적을 번째(새로 알릴 때 reminded + 1, 다시 보낼 때·조용히 남길 때 reminded)
+const remindBody = (s, n = s.reminded + 1) => {
   const m = s.machine === "local" ? undefined : s.machine;
   const a = liveAgent(s.machine, s.pane)?.info ?? { pane_id: s.pane };
   const title = a.label || a.terminal_title_stripped || a.name || a.agent || s.pane;
@@ -487,7 +488,7 @@ const remindBody = (s) => {
   return {
     id: remindItemId(s.machine, s.pane),
     text: `${m ? `[${m}] ` : ""}${blocked ? `⚠️ ${title} 아직 확인을 기다려요` : `✅ ${title} 끝난 뒤 답이 없어요`}`.slice(0, 500),
-    detail: remindDetail(s, REMIND),
+    meta: remindMeta(s, REMIND, n), // 둘째 줄 「12분째 기다려요 · …」 — 앱이 지난 시간을 계속 고친다
     kind: bubbleKind(s.phase),
     sticky: true,
     group: REMIND_GROUP,
@@ -496,11 +497,12 @@ const remindBody = (s) => {
     source: paneSource(a, m),
   };
 };
-// 묶음 필드(group)를 모르는 예전 데몬이면 빼고 다시
+// 예전 데몬이 모르는 필드(meta·group)면 빼고 다시 — meta 는 보낼 때의 지난 시간 글(detail)로
 async function postGrouped(body) {
-  if (await bus("/bubbles", body)) return true;
-  const { group: _g, groupSummary: _s, ...plain } = body;
-  return !!(await bus("/bubbles", plain));
+  let last = null;
+  const ok = await postWithFallback(async (b) => (last = await busRaw("/bubbles", b)), body);
+  if (!ok) note(`remind: post ${body.id} FAILED ${last?.status || ""} ${String(last?.error ?? "").slice(0, 200)}`);
+  return ok;
 }
 const clearRemind = (id) => bus(`/bubbles/${encodeURIComponent(id.startsWith("ext:") ? id : `ext:${id}`)}/clear`);
 async function syncSummary() {
@@ -546,21 +548,24 @@ async function remindTick() {
   if ((!REMIND.on || tracker.snoozeUntil > now) && shown.size) return hideAll();
   for (const [k, s] of shown) if (!plan.alive.has(k)) { shown.delete(k); await clearRemind(remindItemId(s.machine, s.pane)); }
   if (plan.round?.length) {
-    const keys = new Set(plan.round.map((s) => s.key));
+    // 끝남 N번 다 된 줄(quiet)은 알림 없이 남긴다: 떠 있으면 손대지 않고(같은 id 를 안 건드려 다시 뜨지·폰에 가지 않음), 미룸 등으로 걷혔으면 이 묶음에 다시 넣기만(세지 않음)
+    const keys = new Set([...plan.round, ...plan.quiet].map((s) => s.key));
     for (const [k, s] of shown) if (!keys.has(k)) { shown.delete(k); await clearRemind(remindItemId(s.machine, s.pane)); }
+    const back = plan.quiet.filter((s) => !shown.has(s.key));
     summarySig = "?"; // 머리를 먼저(묶음으로 받게) — 새로 알릴 때는 같은 글이어도 다시
-    for (const s of plan.round) shown.set(s.key, s);
+    for (const s of [...plan.round, ...back]) shown.set(s.key, s);
     await syncSummary();
     for (const s of plan.round) {
       await postGrouped(remindBody(s));
       markShown(tracker, s, now); // 바로 센다 — 기록(같은 ts)을 다시 읽어도 한 번만
       logEvent("remind", { ts: new Date(now).toISOString(), action: "shown", machine: s.machine, pane: s.pane, status: s.phase });
     }
-    logEvent("remind", { action: "digest", n: plan.round.length });
-    note(`remind: ${plan.round.length} sessions (${plan.round.map((s) => `${s.key}:${s.phase}`).join(",")})`);
+    for (const s of back) await postGrouped(remindBody(s, s.reminded));
+    logEvent("remind", { action: "digest", n: plan.round.length, ...(plan.quiet.length ? { quiet: plan.quiet.length } : {}) });
+    note(`remind: ${plan.round.length} sessions (${plan.round.map((s) => `${s.key}:${s.phase}`).join(",")})${plan.quiet.length ? ` quiet=${plan.quiet.length}` : ""}`);
   } else if (summarySig === "?") {
     await syncSummary();
-    for (const s of shown.values()) await postGrouped(remindBody(s)); // 이어받은 줄은 같은 id 로 다시(기록은 안 함)
+    for (const s of shown.values()) await postGrouped(remindBody(s, Math.max(1, s.reminded))); // 이어받은 줄은 같은 id·같은 글로 다시(기록은 안 함)
   }
   await syncSummary();
 }
@@ -590,18 +595,22 @@ async function remindAction(id, key, ref) {
   return false;
 }
 
-// 묶음 줄·머리가 닫힘: 사용자가 닫았으면 이번 묶음에서 뺀다(다음 때 다시). 머리를 닫으면(모두 닫기) 다 뺀다. 우리가 걷은 것(cleared)은 그대로
+// 묶음 줄·머리가 닫힘: 사용자가 닫았으면 이번 묶음에서 뺀다(다음 때 다시 — 끝남 N번 다 된 줄은 다시 안 넣는다). 머리를 닫으면(모두 닫기) 다 뺀다. 우리가 걷은 것(cleared)은 그대로
 async function remindClosed(id, reason, r) {
   if (reason === "cleared") return;
   if (id === `ext:${SUMMARY_ID}`) {
-    for (const s of shown.values()) logEvent("remind", { action: "dismissed", machine: s.machine, pane: s.pane });
+    const t = Date.now();
+    for (const s of shown.values()) { s.hiddenAt = t; logEvent("remind", { action: "dismissed", machine: s.machine, pane: s.pane }); }
     summarySig = "";
     await hideAll();
     return;
   }
   if (!r) return;
   const k = sessionKey(r.machine, r.pane);
-  if (!shown.delete(k)) return;
+  const s = shown.get(k);
+  if (!s) return;
+  shown.delete(k);
+  s.hiddenAt = Date.now(); // 기록을 끈 때도 — 조용히 남기던 줄(끝남 N번 뒤)은 이걸로 안 돌아온다
   logEvent("remind", { action: "dismissed", machine: r.machine ?? "local", pane: r.pane });
   await syncSummary();
 }

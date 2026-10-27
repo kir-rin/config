@@ -81,9 +81,8 @@ export function sessionName() {
   return m ? m[1] : undefined;
 }
 
-// AgentBot 버스 → 응답 JSON(성공) | null. 앱이 꺼져 있으면 조용히 넘어간다
-// timeoutMs: 캐릭터 한 줄을 기다리는 POST /bubbles(summarize)는 길게(데몬이 최대 20초 기다린다)
-export async function bus(path, body, timeoutMs = 3000) {
+// AgentBot 버스 → { ok, status, error?, data? }. 꺼져 있으면 status 0 — 400 이유(error)를 보고 다시 보낼 쪽(다시 알림 meta)이 쓴다
+export async function busRaw(path, body, timeoutMs = 3000) {
   const base = (process.env.AGENT_BUBBLE_URL || "http://127.0.0.1:47891").replace(/\/+$/, "");
   try {
     const res = await fetch(base + path, {
@@ -92,15 +91,18 @@ export async function bus(path, body, timeoutMs = 3000) {
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!res.ok) {
-      console.error(`agent-bot ${path}: ${res.status} ${await res.text().catch(() => "")}`);
-      return null;
-    }
-    return await res.json().catch(() => ({}));
+    if (!res.ok) return { ok: false, status: res.status, error: await res.text().catch(() => "") };
+    return { ok: true, status: res.status, data: await res.json().catch(() => ({})) };
   } catch (e) {
-    console.error(`agent-bot ${path}: ${e.message}`);
-    return null;
+    return { ok: false, status: 0, error: e.message };
   }
+}
+// AgentBot 버스 → 응답 JSON(성공) | null. 앱이 꺼져 있으면 조용히 넘어간다
+// timeoutMs: 캐릭터 한 줄을 기다리는 POST /bubbles(summarize)는 길게(데몬이 최대 20초 기다린다)
+export async function bus(path, body, timeoutMs = 3000) {
+  const r = await busRaw(path, body, timeoutMs);
+  if (!r.ok) console.error(`agent-bot ${path}: ${r.status || ""} ${r.error ?? ""}`.replace(/ +/g, " "));
+  return r.ok ? r.data : null;
 }
 
 export const bubbleId = (pane) => `herdr:${pane}`;
