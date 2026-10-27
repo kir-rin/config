@@ -68,7 +68,8 @@ const res = await bus("/bubbles", {
   source: paneSource({ pane_id: pane, ...info }),
   ...(material ? { summarize: { state: blocked ? "blocked" : "done", title: title.slice(0, 200), material } } : {}),
 }, material ? 25000 : 3000);
-if (res && !TEST) logEvent("shown", { pane, agent: info.agent ?? agent, id: `ext:${bubbleId(pane)}`, kind: bubbleKind(status), buttons: sessionButtons(status).map((b) => b.key) });
+const life = bubbleLife(status); // 다시 알림이 「아직 떠 있나」를 어림할 때 쓴다(예전 데몬)
+if (res && !TEST) logEvent("shown", { pane, agent: info.agent ?? agent, id: `ext:${bubbleId(pane)}`, kind: bubbleKind(status), buttons: sessionButtons(status).map((b) => b.key), ...(life.ttlMs ? { ttlMs: life.ttlMs } : {}) });
 note(`${pane} bubble ${res ? "sent" : "FAILED"} ${status} material=${material ? material.length : 0} line=${res?.text ? JSON.stringify(res.text) : "-"}`);
 
 // 읽기: 캐릭터 한 줄이 나왔으면 그 줄, 아니면 처음 글

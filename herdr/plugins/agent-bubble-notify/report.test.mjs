@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { parseMachineNames, machineBubbleId } from "./lib.mjs";
 import { machineChanges, enqueueAction, cacheFresh, sidebarOrder, navSteps, navBurst } from "./herdr-bridge.mjs";
 import { remindStats } from "./metrics.mjs";
-import { remindConfig, reminderState, nextDue, digestPlan, stillShown, isRemindId, remindItemId, sessionKey, SUMMARY_ID } from "./remind.mjs";
+import { isRemindId, remindItemId, sessionKey, SUMMARY_ID } from "./remind.mjs";
 import { parseNotifyLine, backfillEvents, machineCanon, sessionMachine, dedupEvents, dropOverlap, pairWaits, concurrencyStats, percentile, bubbleMix, mixStats, buildReport } from "./metrics.mjs";
 
 const NAMES = parseMachineNames("home:집:blue,company:회사:purple,local:집:blue");
@@ -227,87 +227,7 @@ test("bridge 사이드바 캐시: 신선도 · 차례(이 컴퓨터 → 저장 �
 // ---- 다시 알림(remind.mjs) ----
 const MIN = 60e3;
 const ev = (min, type, f = {}) => ({ ts: new Date(T0 + min * MIN).toISOString(), type, viewer: "집", machine: "local", ...f });
-const CFG = remindConfig({});
-
-test("다시 알림 설정: 기본 입력 대기 10분·그 뒤 30분마다, 끝남 30분·2시간, 미룸 1시간 · .env 로 바꾸고 끈다", () => {
-  assert.deepEqual(CFG, { on: true, blockedFirstMs: 10 * MIN, blockedEveryMs: 30 * MIN, doneAtMs: [30 * MIN, 120 * MIN], snoozeMs: 60 * MIN });
-  assert.equal(remindConfig({ AGENT_BUBBLE_REMIND: "off" }).on, false);
-  const c = remindConfig({ AGENT_BUBBLE_REMIND_BLOCKED_FIRST_MIN: "5", AGENT_BUBBLE_REMIND_BLOCKED_EVERY_MIN: "0", AGENT_BUBBLE_REMIND_DONE_MIN: "60, 15,x", AGENT_BUBBLE_REMIND_SNOOZE_MIN: "30" });
-  assert.deepEqual([c.blockedFirstMs, c.blockedEveryMs, c.doneAtMs, c.snoozeMs], [5 * MIN, 0, [15 * MIN, 60 * MIN], 30 * MIN]);
-  assert.deepEqual(remindConfig({ AGENT_BUBBLE_REMIND_DONE_MIN: "" }).doneAtMs, []); // 끝남은 끔
-});
-
-test("다시 알림: 답 안 한 세션 — 닫혔을 때 끝남·대기, 다시 돎·답·(끝남만) 봄이면 아님", () => {
-  const events = [
-    ev(0, "status", { pane: "a", from: "working", to: "done" }), ev(0, "shown", { pane: "a", id: "ext:herdr:a" }), ev(1, "closed", { pane: "a", id: "ext:herdr:a", reason: "dismissed" }),
-    ev(0, "status", { pane: "b", from: "working", to: "blocked" }), ev(0, "shown", { pane: "b", id: "ext:herdr:b" }), ev(1, "focus", { pane: "b" }), ev(1, "closed", { pane: "b", id: "ext:herdr:b", reason: "cleared" }), // 대기는 봐도 그대로
-    ev(0, "status", { pane: "c", from: "working", to: "done" }), ev(0, "shown", { pane: "c", id: "ext:herdr:c" }), ev(1, "focus", { pane: "c" }), ev(1, "closed", { pane: "c", id: "ext:herdr:c", reason: "cleared" }), // 끝남은 보면 끝
-    ev(0, "status", { pane: "d", from: "working", to: "done" }), ev(0, "shown", { pane: "d", id: "ext:herdr:d" }), ev(1, "action", { pane: "d", id: "ext:herdr:d", key: "reply", ok: true }), ev(1, "closed", { pane: "d", id: "ext:herdr:d", reason: "cleared" }), // 답함
-    ev(0, "status", { pane: "e", from: "done", to: "working" }), ev(1, "closed", { pane: "e", id: "ext:herdr:e", reason: "cleared" }), // 다시 돎
-    ev(0, "status", { machine: "company", pane: "f", from: "working", to: "blocked" }), ev(1, "closed", { machine: "company", pane: "f", id: "ext:herdr:company:f", reason: "expired", status: "blocked" }),
-    ev(2, "status", { pane: "g", from: "working", to: "done" }), ev(2, "closed", { pane: "g", id: "ext:herdr:g", reason: "dismissed" }), ev(3, "status", { pane: "g", from: "done", to: "working" }), // 닫은 뒤 다시 돎
-    ev(1, "closed", { pane: "x", id: `ext:${SUMMARY_ID}`, reason: "dismissed" }), // 다시 알림 말풍선은 세션 닫힘이 아니다
-  ].sort((p, q) => Date.parse(p.ts) - Date.parse(q.ts));
-  const st = reminderState(events);
-  assert.deepEqual([...st.sessions.keys()].sort(), ["company|f", "local|a", "local|b"]);
-  assert.equal(st.sessions.get("local|b").status, "blocked");
-  assert.equal(st.sessions.get("company|f").closedAt, T0 + MIN);
-  // 대기가 풀리면 아님
-  assert.equal(reminderState([...events, ev(5, "status", { pane: "b", from: "blocked", to: "working" })]).sessions.has("local|b"), false);
-  // 다시 알림 줄에서 [세션으로 가기] — 끝남은 본 것, 대기는 그대로
-  const go = (pane) => ev(40, "action", { pane, id: remindItemId("local", pane), key: "default", ok: true });
-  const after = reminderState([...events, go("a"), go("b")]);
-  assert.equal(after.sessions.has("local|a"), false);
-  assert.equal(after.sessions.has("local|b"), true);
-});
-
-test("다시 알림 때: 입력 대기 10분 뒤 · 그 뒤 30분마다 / 끝남 30분·2시간 뒤 그만 · 늦게 보면 한 번만", () => {
-  const b = { status: "blocked", closedAt: 0, lastRemindAt: null };
-  assert.equal(nextDue(b, CFG), 10 * MIN);
-  assert.equal(nextDue({ ...b, lastRemindAt: 10 * MIN }, CFG), 40 * MIN);
-  assert.equal(nextDue({ ...b, lastRemindAt: 41 * MIN }, CFG), 70 * MIN);
-  assert.equal(nextDue({ ...b, lastRemindAt: 10 * MIN }, { ...CFG, blockedEveryMs: 0 }), null);
-  assert.equal(nextDue(b, { ...CFG, blockedFirstMs: 0 }), null);
-  const d = { status: "done", closedAt: 0, lastRemindAt: null };
-  assert.equal(nextDue(d, CFG), 30 * MIN);
-  assert.equal(nextDue({ ...d, lastRemindAt: 30 * MIN }, CFG), 120 * MIN);
-  assert.equal(nextDue({ ...d, lastRemindAt: 120 * MIN }, CFG), null);
-  assert.equal(nextDue({ ...d, lastRemindAt: 200 * MIN }, CFG), null); // 다리가 꺼져 둘 다 지났어도 한 번 알리면 끝
-});
-
-test("다시 알림 묶음: 때가 된 게 있으면 그때 보일 것 전부(대기 먼저) · 미룸·방해 금지·그만·지금 상태가 다르면 없음", () => {
-  const events = [
-    ev(0, "status", { pane: "d", from: "working", to: "done" }), ev(0, "closed", { pane: "d", id: "ext:herdr:d", reason: "dismissed" }),
-    ev(5, "status", { pane: "b", from: "working", to: "blocked" }), ev(5, "closed", { pane: "b", id: "ext:herdr:b", reason: "expired" }),
-  ];
-  const st = reminderState(events);
-  const at = (m) => T0 + m * MIN;
-  assert.equal(digestPlan(st, at(14), CFG).round, null); // 아직
-  let p = digestPlan(st, at(15), CFG); // 대기 10분 — 끝남은 30분 전이라 아직 안 낀다
-  assert.deepEqual(p.round.map((s) => s.key), ["local|b"]);
-  p = digestPlan(st, at(31), CFG);
-  assert.deepEqual(p.round.map((s) => s.key), ["local|b", "local|d"]); // 대기 먼저
-  assert.equal(digestPlan(st, at(31), CFG, new Map(), { quiet: true }).round, null); // 방해 금지
-  assert.equal(digestPlan(st, at(31), { ...CFG, on: false }).round, null);
-  assert.deepEqual([...digestPlan(st, at(31), CFG, new Map([["local|d", "idle"]])).alive], ["local|b"]); // 지금 보니 idle — 본 것
-  // 알린 뒤: 다음 때까지 round 없음, 미룸(1시간) 동안도 없음, 그만이면 빠짐
-  const shown = [...events, ev(31, "remind", { action: "shown", pane: "b" }), ev(31, "remind", { action: "shown", pane: "d" })];
-  assert.equal(digestPlan(reminderState(shown), at(32), CFG).round, null);
-  assert.deepEqual(digestPlan(reminderState(shown), at(45), CFG).round.map((s) => s.key), ["local|b", "local|d"]); // 대기 다음 때(15+30분) — 끝남은 2시간 때가 남아 같이
-  const snoozed = reminderState([...shown, ev(32, "remind", { action: "snooze", until: at(92) })]);
-  assert.equal(digestPlan(snoozed, at(91), CFG).round, null);
-  assert.ok(digestPlan(snoozed, at(92), CFG).round.length);
-  const muted = reminderState([...shown, ev(33, "remind", { action: "mute", pane: "b" })]);
-  assert.deepEqual([...digestPlan(muted, at(150), CFG).alive], ["local|d"]);
-  // 끝남은 2시간 때가 지나 알리면 더 안 낀다
-  const late = reminderState([...shown, ev(121, "remind", { action: "shown", pane: "d" }), ev(121, "remind", { action: "mute", pane: "b" })]);
-  assert.equal(digestPlan(late, at(500), CFG).round, null);
-  // 다리를 다시 켬: 알렸고 그 뒤 안 닫은 것만 아직 떠 있다
-  const hid = reminderState([...shown, ev(35, "remind", { action: "dismissed", pane: "d" })]);
-  assert.deepEqual(stillShown(hid, new Set(["local|b", "local|d"])).map((s) => s.key), ["local|b"]);
-  assert.equal(st.everReminded.size, 0);
-  assert.deepEqual([...reminderState(shown).everReminded].sort(), ["local|b", "local|d"]);
-});
+// 다시 알림 규칙(때·묶음·설정)은 remind.test.mjs
 
 test("다시 알림 id: 머리·줄은 _remind — 어떤 머신 이름의 세션 말풍선과도 안 겹친다 · 리포트 셈", () => {
   assert.equal(remindItemId("local", "w4:p3"), "herdr:_remind:local:w4:p3");
