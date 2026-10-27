@@ -1,7 +1,7 @@
 // 답 안 한 세션 다시 알림 — 순수 함수(herdr-bridge.mjs 가 events.jsonl·지금 목록·데몬 설정을 넘긴다). 파일·네트워크는 fetchRemindPref 만(주입)
 // 「답 안 한 세션」: 아는 세션 전부(이 컴퓨터 herdr agent list + 다른 컴퓨터 poll) 중 입력 대기(blocked)거나 끝남(done — 끝난 뒤 봐서 idle 이 된 것도)인 채로
 // 간격 이상 지났고, 그 뒤로 다시 돌지(working) 않았고 답(reply)도 안 보낸 것. 끝난 걸 보기만(idle) 한 건 답이 아니다.
-// 간격마다 다시(끝남은 최대 N번, 입력 대기는 풀릴 때까지). 끝남 N번 뒤에도 묶음 줄로는 조용히 남긴다(답·닫기·그만·세션 사라짐까지). 미룸·그만·방해 금지 시간이면 쉰다. 그 세션 말풍선이 아직 떠 있으면 묶음에 안 넣는다(떠 있는 게 이미 알림)
+// 간격마다 다시(세션마다 제 때에만 · 끝남은 최대 N번, 입력 대기는 풀릴 때까지). 끝남 N번 뒤에도 묶음 줄로는 조용히 남긴다(답·닫기·그만·세션 사라짐까지). 미룸·그만·방해 금지 시간이면 쉰다. 그 세션 말풍선이 아직 떠 있으면 묶음에 안 넣는다(떠 있는 게 이미 알림)
 import { bubbleId, machineBubbleId } from "./lib.mjs";
 
 const MIN = 60e3;
@@ -75,13 +75,14 @@ function sess(tr, machine, pane) {
   const key = sessionKey(machine, pane);
   let s = tr.sessions.get(key);
   if (!s) {
-    s = { key, machine: !machine || machine === "local" ? "local" : machine, pane, raw: undefined, phase: null, since: null, at: -Infinity, reminded: 0, lastRemindAt: null, muted: false, hiddenAt: null, ownShownAt: null, ownClosedAt: null, ownTtlMs: null };
+    s = { key, machine: !machine || machine === "local" ? "local" : machine, pane, raw: undefined, phase: null, since: null, at: -Infinity, reminded: 0, lastRemindAt: null, muted: false, hiddenAt: null, expiredAt: null, ownShownAt: null, ownClosedAt: null, ownTtlMs: null };
     tr.sessions.set(key, s);
   }
   return s;
 }
-const enter = (s, phase, t) => Object.assign(s, { phase, since: t, at: t, reminded: 0, lastRemindAt: null, muted: false, hiddenAt: null });
-const leave = (s, t) => Object.assign(s, { phase: null, since: null, at: t, reminded: 0, lastRemindAt: null, muted: false, hiddenAt: null });
+// expiredAt: 앱이 넘쳐 버린 줄(닫기 아님 — 다음 알림 때 다시). 다리 안에서만
+const enter = (s, phase, t) => Object.assign(s, { phase, since: t, at: t, reminded: 0, lastRemindAt: null, muted: false, hiddenAt: null, expiredAt: null });
+const leave = (s, t) => Object.assign(s, { phase: null, since: null, at: t, reminded: 0, lastRemindAt: null, muted: false, hiddenAt: null, expiredAt: null });
 
 // 상태 하나 → 단계. done·blocked 로 들어오면 시작(같은 단계면 그대로, missed = 그사이 한 바퀴 돌아 같은 상태면 새로).
 // idle: 끝남 뒤(봄)면 끝남 그대로 · working 뒤면 끝남 · 대기 뒤면 풀림. working 이면 풀림
@@ -189,18 +190,34 @@ export function nextDue(s, cfg) {
 // 끝남 N번을 다 알렸고 그 뒤 닫지 않은 것 — 다시 알리지는 않고(세지도 않음) 묶음 줄로만 조용히 남긴다
 export const quietKeep = (s, cfg) => s.phase === "done" && !s.muted && cfg.doneMax > 0 && s.reminded >= cfg.doneMax && s.lastRemindAt !== null && !((s.hiddenAt ?? -1) >= s.lastRemindAt);
 
+// 묶음에 둘 줄: 알렸고 그 뒤 닫지(✕) 않았고, 그 알림이 지금 단계(처음 말풍선을 닫은 뒤) 것. 끝남 N번 다 된 줄은 그대로 남긴다
+export const listed = (s, cfg) => s.lastRemindAt !== null && !((s.hiddenAt ?? -1) >= s.lastRemindAt) && (s.lastRemindAt >= baseOf(s) || quietKeep(s, cfg));
+
 // 지금 무엇을 보일까 → { alive: Set(key)(아직 답 안 했고 제 말풍선도 안 떠 있는 것 — 떠 있는 묶음에서 이것만 남긴다),
-//   round: null | [세션…](새로 알릴 때가 됐다 — 때가 된 게 하나라도 있으면 처음 때가 지난 것 전부, 입력 대기 먼저·오래 기다린 것 먼저),
-//   quiet: [세션…](round 가 있을 때 같이 묶음에 남길 끝남 N번 다 된 줄 — 알림·셈 없이) }
-// 꺼짐·방해 금지·미룸 동안은 round 없음
+//   pause: null | "off" | "snooze" | "quiet"(방해 금지),
+//   due: null | [세션…](제 때가 된 것만 — 이것만 다시 알리고 센다. 남의 때에 묻어 세지 않는다. 입력 대기 먼저·오래 기다린 것 먼저),
+//   keep: [세션…](due 말고 묶음에 둘 줄 — 알림·셈 없이 지금 글 그대로) }
 export function digestPlan(tr, now, cfg, { quiet = false, liveIds = null } = {}) {
   const waiting = [...tr.sessions.values()].filter((s) => s.phase && !s.muted && !ownVisible(s, now, liveIds));
   const alive = new Set(waiting.map((s) => s.key));
-  if (!cfg.on || quiet || tr.snoozeUntil > now) return { alive, round: null, quiet: [] };
-  if (!waiting.some((s) => { const d = nextDue(s, cfg); return d !== null && d <= now; })) return { alive, round: null, quiet: [] };
+  const pause = !cfg.on ? "off" : tr.snoozeUntil > now ? "snooze" : quiet ? "quiet" : null;
   const order = (a, b) => (a.phase === "blocked" ? 0 : 1) - (b.phase === "blocked" ? 0 : 1) || a.since - b.since;
-  const round = waiting.filter((s) => { const f = firstDue(s, cfg); return f !== null && f <= now && nextDue(s, cfg) !== null; }).sort(order);
-  return { alive, round, quiet: waiting.filter((s) => quietKeep(s, cfg)).sort(order) };
+  const due = pause ? [] : waiting.filter((s) => { const d = nextDue(s, cfg); return d !== null && d <= now; }).sort(order);
+  const dk = new Set(due.map((s) => s.key));
+  return { alive, pause, due: due.length ? due : null, keep: waiting.filter((s) => !dk.has(s.key) && listed(s, cfg)).sort(order) };
+}
+
+// 이번 틱에 다리가 할 일. shown = 지금 떠 있는 줄 key 집합
+// hide: 꺼짐·미룸 — 다 걷는다(닫기 아님, 끝나면 keep 으로 다시) · clear: 이제 안 둘 줄
+// alert: 새 글로 보내고 센다(머리도 다시) · add: 안 떠 있는 keep 줄 — 지금 글 그대로 넣기만(세지 않음).
+//   알림 없는 틱에도 넣는다(미룸·꺼짐·제 말풍선 때문에 걷혔다 돌아온 것). 앱이 넘쳐 버린 줄(expiredAt)은 다음 알림 때만(곧 또 버려지지 않게). 방해 금지 동안엔 안 넣는다
+export function digestActions(plan, shown) {
+  if (plan.pause === "off" || plan.pause === "snooze") return { hide: true, clear: [...shown], alert: [], add: [] };
+  const keys = new Set([...(plan.due ?? []), ...plan.keep].map((s) => s.key));
+  const clear = [...shown].filter((k) => !keys.has(k));
+  if (plan.pause) return { hide: false, clear, alert: [], add: [] };
+  const add = plan.keep.filter((s) => !shown.has(s.key) && (plan.due || s.expiredAt == null));
+  return { hide: false, clear, alert: plan.due ?? [], add };
 }
 
 // 묶음 머리 글 · 미룸 단추
@@ -226,16 +243,19 @@ export const metaFallback = (meta, now) => meta.text.replace("{ago}", agoText(no
 
 // POST /bubbles 를 보내고, 예전 데몬이 모르는 필드로 400(unknown field: meta|group|groupSummary)이면 그것만 빼고 다시.
 // meta 를 빼면 그 글을 지금 때로 바꿔 detail 에 넣는다. post(body) → { ok, status, error } (lib busRaw)
-export async function postWithFallback(post, body, now = Date.now()) {
-  let b = body;
+// seen: { meta, at } — 데몬이 meta 를 모른다고 했으면 10분 동안은 처음부터 빼고 보낸다(요청 한 번). 모양 거절(새 데몬 검증)은 그 한 번만 뺀다
+export const META_RETRY_MS = 10 * MIN;
+const dropMeta = ({ meta, ...rest }, now) => ({ ...rest, detail: metaFallback(meta, now) });
+export async function postWithFallback(post, body, now = Date.now(), seen = {}) {
+  let b = body.meta && seen.meta === false && now - (seen.at ?? 0) < META_RETRY_MS ? dropMeta(body, now) : body;
   for (let i = 0; i < 4; i++) {
     const r = await post(b);
-    if (r?.ok) return true;
+    if (r?.ok) { if (b.meta) seen.meta = true; return true; }
     if (r?.status !== 400) return false;
     const e = String(r.error ?? "");
     if (b.meta && /\bmeta\b/.test(e)) {
-      const { meta, ...rest } = b;
-      b = { ...rest, detail: metaFallback(meta, now) };
+      if (/unknown field: meta\b/.test(e)) Object.assign(seen, { meta: false, at: now });
+      b = dropMeta(b, now);
     } else if ((b.group !== undefined || b.groupSummary !== undefined) && /\bgroup/.test(e)) {
       const { group: _g, groupSummary: _s, ...rest } = b;
       b = rest;

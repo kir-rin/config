@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { loadDotEnv, modeEnabled, envFlag, envInt, bus, busRaw, note, speak, sessionButtons, herdrRef, parseHerdrRef, paneSource, bubbleKind, bubbleLife, machineBubbleId, logEvent, SESSION_BUTTONS, REPLY_BUTTON } from "./lib.mjs";
 import { parseEvents } from "./metrics.mjs";
-import { remindConfig, fetchRemindPref, prefCache, newTracker, applyEvents, applyLive, markShown, digestPlan, stillShown, isRemindId, remindItemId, sessionKey, summaryText, snoozeLabel, remindMeta, postWithFallback, SUMMARY_ID, REMIND_GROUP } from "./remind.mjs";
+import { remindConfig, fetchRemindPref, prefCache, newTracker, applyEvents, applyLive, markShown, digestPlan, digestActions, stillShown, isRemindId, remindItemId, sessionKey, summaryText, snoozeLabel, remindMeta, metaFallback, postWithFallback, SUMMARY_ID, REMIND_GROUP } from "./remind.mjs";
 
 loadDotEnv();
 const HERDR = process.env.HERDR_BIN_PATH || "herdr";
@@ -498,13 +498,17 @@ const remindBody = (s, n = s.reminded + 1) => {
   };
 };
 // 예전 데몬이 모르는 필드(meta·group)면 빼고 다시 — meta 는 보낼 때의 지난 시간 글(detail)로
+const metaSeen = {}; // 데몬이 meta 를 아나(remind postWithFallback)
+const sentDetail = new Map(); // 줄 id → 예전 데몬에 보낸 detail(지난 시간 글을 고칠 때 비교)
 async function postGrouped(body) {
-  let last = null;
-  const ok = await postWithFallback(async (b) => (last = await busRaw("/bubbles", b)), body);
+  let last = null, sent = null;
+  const ok = await postWithFallback(async (b) => { sent = b; return (last = await busRaw("/bubbles", b)); }, body, Date.now(), metaSeen);
   if (!ok) note(`remind: post ${body.id} FAILED ${last?.status || ""} ${String(last?.error ?? "").slice(0, 200)}`);
+  else if (typeof sent?.detail === "string") sentDetail.set(body.id, sent.detail);
+  else sentDetail.delete(body.id);
   return ok;
 }
-const clearRemind = (id) => bus(`/bubbles/${encodeURIComponent(id.startsWith("ext:") ? id : `ext:${id}`)}/clear`);
+const clearRemind = (id) => { sentDetail.delete(id.replace(/^ext:/, "")); return bus(`/bubbles/${encodeURIComponent(id.startsWith("ext:") ? id : `ext:${id}`)}/clear`); };
 async function syncSummary() {
   const list = [...shown.values()];
   const kind = list.some((s) => s.phase === "blocked") ? "warn" : "info";
@@ -537,36 +541,43 @@ async function remindTick() {
   await refreshLive(now);
   const [quiet, liveIds] = await Promise.all([quietNow(), liveBubbleIds()]);
   const plan = digestPlan(tracker, now, REMIND, { quiet, liveIds });
+  let resend = [];
   if (!remindStarted) { // 다리를 다시 켬: 아직 떠 있을 줄을 이어받고, 나머지 예전 줄은 걷는다
     remindStarted = true;
     const keep = stillShown(tracker, plan.alive);
     for (const k of tracker.everReminded) if (!keep.some((s) => s.key === k)) { const [m, pane] = k.split("|"); await clearRemind(remindItemId(m, pane)); }
     for (const s of keep) shown.set(s.key, s);
+    resend = keep;
     summarySig = "?";
     note(`remind: every=${REMIND.everyMs / 60e3}m(${REMIND.from.every}) on=${REMIND.on}(${REMIND.from.on}) doneMax=${REMIND.doneMax}`);
   }
-  if ((!REMIND.on || tracker.snoozeUntil > now) && shown.size) return hideAll();
-  for (const [k, s] of shown) if (!plan.alive.has(k)) { shown.delete(k); await clearRemind(remindItemId(s.machine, s.pane)); }
-  if (plan.round?.length) {
-    // 끝남 N번 다 된 줄(quiet)은 알림 없이 남긴다: 떠 있으면 손대지 않고(같은 id 를 안 건드려 다시 뜨지·폰에 가지 않음), 미룸 등으로 걷혔으면 이 묶음에 다시 넣기만(세지 않음)
-    const keys = new Set([...plan.round, ...plan.quiet].map((s) => s.key));
-    for (const [k, s] of shown) if (!keys.has(k)) { shown.delete(k); await clearRemind(remindItemId(s.machine, s.pane)); }
-    const back = plan.quiet.filter((s) => !shown.has(s.key));
-    summarySig = "?"; // 머리를 먼저(묶음으로 받게) — 새로 알릴 때는 같은 글이어도 다시
-    for (const s of [...plan.round, ...back]) shown.set(s.key, s);
-    await syncSummary();
-    for (const s of plan.round) {
-      await postGrouped(remindBody(s));
-      markShown(tracker, s, now); // 바로 센다 — 기록(같은 ts)을 다시 읽어도 한 번만
-      logEvent("remind", { ts: new Date(now).toISOString(), action: "shown", machine: s.machine, pane: s.pane, status: s.phase });
-    }
-    for (const s of back) await postGrouped(remindBody(s, s.reminded));
-    logEvent("remind", { action: "digest", n: plan.round.length, ...(plan.quiet.length ? { quiet: plan.quiet.length } : {}) });
-    note(`remind: ${plan.round.length} sessions (${plan.round.map((s) => `${s.key}:${s.phase}`).join(",")})${plan.quiet.length ? ` quiet=${plan.quiet.length}` : ""}`);
-  } else if (summarySig === "?") {
-    await syncSummary();
-    for (const s of shown.values()) await postGrouped(remindBody(s, Math.max(1, s.reminded))); // 이어받은 줄은 같은 id·같은 글로 다시(기록은 안 함)
+  const act = digestActions(plan, new Set(shown.keys()));
+  if (act.hide) return void (shown.size && (await hideAll()));
+  for (const k of act.clear) { const s = shown.get(k); shown.delete(k); await clearRemind(remindItemId(s.machine, s.pane)); }
+  // 떠 있는 keep 줄은 손대지 않는다(같은 id·같은 글 — 다시 뜨지·폰에 가지 않음). 넣는 줄은 셈 없이 지금 글(n = reminded)
+  if (act.alert.length) { summarySig = "?"; for (const s of act.add) s.expiredAt = null; } // 머리를 먼저(묶음으로 받게) — 알릴 때는 같은 글이어도 다시
+  for (const s of [...act.alert, ...act.add]) shown.set(s.key, s);
+  await syncSummary();
+  const posted = new Set();
+  for (const s of act.alert) {
+    await postGrouped(remindBody(s));
+    markShown(tracker, s, now); // 바로 센다 — 기록(같은 ts)을 다시 읽어도 한 번만
+    logEvent("remind", { ts: new Date(now).toISOString(), action: "shown", machine: s.machine, pane: s.pane, status: s.phase });
+    posted.add(s.key);
   }
+  for (const s of [...act.add, ...resend]) if (shown.has(s.key) && !posted.has(s.key)) { await postGrouped(remindBody(s, Math.max(1, s.reminded))); posted.add(s.key); } // 이어받은 줄도 같은 id·같은 글로(기록은 안 함)
+  // 예전 데몬(meta 모름): detail 의 「N분째」가 굳지 않게 바뀌었을 때만 다시(내용 교체 — 위치 그대로·다시 안 뜸). 누름 처리 중인 줄은 건너뛴다
+  if (metaSeen.meta === false) {
+    for (const s of shown.values()) {
+      const body = remindBody(s, Math.max(1, s.reminded));
+      if (posted.has(s.key) || lanes.has(`ext:${body.id}`) || sentDetail.get(body.id) === metaFallback(body.meta, Date.now())) continue;
+      await postGrouped(body);
+    }
+  }
+  if (act.alert.length) {
+    logEvent("remind", { action: "digest", n: act.alert.length, ...(act.add.length ? { back: act.add.length } : {}) });
+    note(`remind: ${act.alert.length} sessions (${act.alert.map((s) => `${s.key}:${s.phase}`).join(",")})${act.add.length ? ` back=${act.add.length}` : ""}`);
+  } else if (act.add.length) note(`remind: back ${act.add.map((s) => s.key).join(",")}`);
   await syncSummary();
 }
 
@@ -595,10 +606,12 @@ async function remindAction(id, key, ref) {
   return false;
 }
 
-// 묶음 줄·머리가 닫힘: 사용자가 닫았으면 이번 묶음에서 뺀다(다음 때 다시 — 끝남 N번 다 된 줄은 다시 안 넣는다). 머리를 닫으면(모두 닫기) 다 뺀다. 우리가 걷은 것(cleared)은 그대로
+// 묶음 줄·머리가 닫힘: 사용자가 닫았으면(dismissed) 뺀다 — 알리는 중이면 다음 알림 때 다시, 끝남 N번 다 된 줄은 다시 안 넣는다. 머리를 닫으면(모두 닫기) 다 뺀다.
+// 앱이 넘쳐 버린 것(expired)은 닫기가 아니다 — 다음 알림 때 다시. 우리가 걷은 것(cleared)은 그대로
 async function remindClosed(id, reason, r) {
   if (reason === "cleared") return;
   if (id === `ext:${SUMMARY_ID}`) {
+    if (reason !== "dismissed") return void (summarySig = ""); // 머리만 버려짐 — 다음에 다시 보낸다
     const t = Date.now();
     for (const s of shown.values()) { s.hiddenAt = t; logEvent("remind", { action: "dismissed", machine: s.machine, pane: s.pane }); }
     summarySig = "";
@@ -610,8 +623,11 @@ async function remindClosed(id, reason, r) {
   const s = shown.get(k);
   if (!s) return;
   shown.delete(k);
-  s.hiddenAt = Date.now(); // 기록을 끈 때도 — 조용히 남기던 줄(끝남 N번 뒤)은 이걸로 안 돌아온다
-  logEvent("remind", { action: "dismissed", machine: r.machine ?? "local", pane: r.pane });
+  sentDetail.delete(id.replace(/^ext:/, ""));
+  if (reason === "dismissed") {
+    s.hiddenAt = Date.now(); // 기록을 끈 때도 — 조용히 남기던 줄(끝남 N번 뒤)은 이걸로 안 돌아온다
+    logEvent("remind", { action: "dismissed", machine: r.machine ?? "local", pane: r.pane });
+  } else s.expiredAt = Date.now();
   await syncSummary();
 }
 
