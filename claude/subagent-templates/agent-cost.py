@@ -2,6 +2,10 @@
 """워크플로우 subagent 의 비용을 본다(표준 라이브러리만).
 
 사용: python3 agent-cost.py <워크플로우 transcript 폴더 또는 agent-*.jsonl> [--top 5] [--md <출력.md>]
+      python3 agent-cost.py <src> --history [폴더|파일.jsonl]   # agent 마다 한 줄을 이력에(이미 있는 agent id 는 건너뜀)
+      python3 agent-cost.py [src] --chart [--run <id>]           # 이력에서 run 하나를 터미널 그림으로
+이력: ~/.claude/agent-cost/history-YYYY-MM.jsonl(달 = agent 가 끝난 시각, UTC). run = 기록 경로의 workflows/wf_… 폴더 이름, 없으면 agent id.
+--chart 의 run 묶기·「지난 실행」(같은 종류: 워크플로우끼리, 단독끼리)은 이번 달·지난달 파일에서 찾는다.
 
 폴더에는 journal.jsonl 과 agent-*.jsonl 이 있다. journal 의 started 이벤트로 agentId 와 label 을 잇는다.
 agent 마다: 모델 · 걸린 분 · 턴 · 맥락 크기(입력+캐시읽기+캐시생성) · 출력 토큰 ·
@@ -160,21 +164,31 @@ def read_targets(name, inp):
     return out
 
 
-def load_agent(path):
+def load_agent(path, max_bytes=None):
+    """기록 줄을 읽는다. max_bytes 를 넘는 큰 기록은 앞 1MB(첫 맥락)와 뒤쪽 일부만 읽는다."""
+    size = os.path.getsize(path)
+    if max_bytes and size > max_bytes:
+        with open(path, 'rb') as f:
+            head = f.read(1 << 20)
+            f.seek(size - (max_bytes - (1 << 20)))
+            tail = f.read()
+        lines = head.split(b'\n')[:-1] + tail.split(b'\n')[1:]
+    else:
+        with open(path, 'rb') as f:
+            lines = f.read().split(b'\n')
     recs = []
-    with open(path, encoding='utf-8') as f:
-        for l in f:
-            l = l.strip()
-            if l:
-                try:
-                    recs.append(json.loads(l))
-                except json.JSONDecodeError:
-                    pass
+    for l in lines:
+        l = l.strip()
+        if l:
+            try:
+                recs.append(json.loads(l))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                pass
     return recs
 
 
-def analyze(path, label):
-    recs = load_agent(path)
+def analyze(path, label, max_bytes=None):
+    recs = load_agent(path, max_bytes)
     stamps = [P(r['timestamp']) for r in recs if r.get('timestamp')]
     if not stamps:
         return None
@@ -221,7 +235,9 @@ def analyze(path, label):
                 inp = u['input']
                 desc = inp.get('command') or inp.get('file_path') or inp.get('pattern') or json.dumps(inp, ensure_ascii=False)
                 calls.append(dict(id=c['tool_use_id'], name=u['name'], kind=k, dur=dur, size=orig, shown=len(text.encode('utf-8')),
-                                  saved=saved, desc=' '.join(str(desc).split()), targets=read_targets(u['name'], inp), ts=u['ts']))
+                                  saved=saved, desc=' '.join(str(desc).split()), targets=read_targets(u['name'], inp), ts=u['ts'],
+                                  lines=text.count('\n') + 1, in_bytes=len(json.dumps(inp, ensure_ascii=False).encode('utf-8')),
+                                  blocked=text.startswith('PreToolUse:') and 'hook error' in text[:200]))
     # 중복 읽기
     seen = {}
     saved_by_path = {c['saved']: c for c in calls if c['saved']}
@@ -247,7 +263,7 @@ def analyze(path, label):
     md_bytes = sum(c['shown'] for c in calls if is_md(c))
     total_bytes = sum(c['shown'] for c in calls)
     tool_sec = sum(c['dur'] for c in calls)
-    return dict(label=label, path=path, model=model or '?', span=span, turns=len(msgs), records=sum(1 for r in recs if r.get('type') == 'assistant'),
+    return dict(label=label, path=path, model=model or '?', span=span, start=min(stamps), end=max(stamps), turns=len(msgs), records=sum(1 for r in recs if r.get('type') == 'assistant'),
                 ctx=ctx, out_tok=out_tok, tool_sec=tool_sec, model_sec=max(0.0, span - tool_sec), kinds=kinds, calls=calls,
                 dup_bytes=dup_bytes, md_bytes=md_bytes, total_bytes=total_bytes)
 
@@ -260,60 +276,282 @@ def short(s, n=90):
     return s if len(s) <= n else s[:n] + '…'
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('src')
-    ap.add_argument('--top', type=int, default=5)
-    ap.add_argument('--md')
-    a = ap.parse_args()
 
-    src = os.path.expanduser(a.src)
-    items = []  # (agentId, path, label)
+
+# ---------------------------------------------------------------- 이력 · 그림
+
+HIST_DIR = os.path.expanduser('~/.claude/agent-cost')
+BYTES_PER_TOK = 3.5  # 도구 결과 바이트 → 토큰 어림(한글이 섞여 4 보다 작게)
+UTC = dt.timezone.utc
+
+
+def run_id(path, agent_id):
+    """기록 경로에 workflows/wf_… 가 있으면 그 폴더 이름, 없으면 agent id."""
+    m = re.search(r'[/\\]workflows[/\\](wf_[^/\\]+)', path)
+    return m.group(1) if m else agent_id
+
+
+def role_of(label):
+    for k in ('재검토', '검토', '수정', '구현'):
+        if k in (label or ''):
+            return k
+    return '기타'
+
+
+def summarize(r, agent_id):
+    """analyze() 결과 → 이력 한 줄(agent 하나)."""
+    c = r['ctx'] or [0]
+    calls = r['calls']
+    saved_paths = {x['saved'] for x in calls if x['saved']}
+    reread = [x for x in calls if any(t[0] in saved_paths for t in x['targets'])]
+    big = [x for x in calls if x['kind'] == 'read' and not x['blocked'] and (x['lines'] > 300 or (x['saved'] and x['size'] > 30 * 1024))]
+    explained = sum(x['shown'] + x['in_bytes'] for x in calls) / BYTES_PER_TOK + r['out_tok']
+    top = []
+    for x in sorted(calls, key=lambda x: -x['size'])[:3]:
+        top.append(dict(kb=round(x['size'] / 1024, 1), cmd=x['desc'][:60], saved=bool(x['saved']), dup=bool(x['dup'])))
+    return dict(
+        run=run_id(r['path'], agent_id), agent_id=agent_id, label=r['label'], role=role_of(r['label']),
+        model=r['model'].replace('claude-', ''), start=r['start'].astimezone(UTC).isoformat(), end=r['end'].astimezone(UTC).isoformat(),
+        min=round(r['span'] / 60, 2), turns=r['turns'], ctx_first=c[0], ctx_end=c[-1], out_tok=r['out_tok'],
+        dup_kb=round(r['dup_bytes'] / 1024, 1), reread=len(reread), md_kb=round(r['md_bytes'] / 1024, 1),
+        blocked=sum(1 for x in calls if x['blocked']), over300=len(big), over300_kb=round(sum(x['shown'] for x in big) / 1024, 1),
+        result_kb=round(r['total_bytes'] / 1024, 1), explained_tok=int(explained), top=top)
+
+
+def month_of(iso):
+    return iso[:7]
+
+
+def prev_month(ym):
+    y, m = int(ym[:4]), int(ym[5:7])
+    return f'{y - 1}-12' if m == 1 else f'{y}-{m - 1:02d}'
+
+
+def hist_files(hist, months):
+    """hist 가 파일이면 그 파일 하나, 폴더면 그 달들의 history-YYYY-MM.jsonl."""
+    if hist.endswith('.jsonl'):
+        return [hist]
+    return [os.path.join(hist, f'history-{m}.jsonl') for m in months]
+
+
+def hist_file_for(hist, end_iso):
+    return hist if hist.endswith('.jsonl') else os.path.join(hist, f'history-{month_of(end_iso)}.jsonl')
+
+
+def read_rows(files):
+    rows = []
+    for f in files:
+        if not os.path.exists(f):
+            continue
+        with open(f, encoding='utf-8') as fh:
+            for l in fh:
+                try:
+                    rows.append(json.loads(l))
+                except json.JSONDecodeError:
+                    pass
+    return rows
+
+
+def append_row(hist, row):
+    """그 agent 한 줄을 끝난 달 파일에 더한다. 이번 달·지난달 파일에 같은 agent id 가 있으면 건너뛴다. 더했으면 True."""
+    import fcntl
+    ym = month_of(row['end'])
+    target = hist_file_for(hist, row['end'])
+    os.makedirs(os.path.dirname(os.path.abspath(target)), exist_ok=True)
+    with open(target, 'a+', encoding='utf-8') as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            for r in read_rows(hist_files(hist, [ym, prev_month(ym)])):
+                if r.get('agent_id') == row['agent_id']:
+                    return False
+            f.seek(0, 2)
+            f.write(json.dumps(row, ensure_ascii=False) + '\n')
+            f.flush()
+            return True
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def group_runs(rows):
+    """run 별 agent 줄 목록, 시작 시각 순 run 목록."""
+    runs = collections.OrderedDict()
+    for r in sorted(rows, key=lambda r: r['start']):
+        runs.setdefault(r['run'], []).append(r)
+    return runs
+
+
+def is_wf(run):
+    return run.startswith('wf_')
+
+
+def run_stats(rs):
+    n = len(rs) or 1
+    impl = [r['ctx_end'] for r in rs if r['role'] == '구현']
+    return collections.OrderedDict([
+        ('시작 고정분 K', sum(r['ctx_first'] for r in rs) / n / 1000),
+        ('끝 맥락 평균 K', sum(r['ctx_end'] for r in rs) / n / 1000),
+        ('구현 끝 맥락 평균 K', (sum(impl) / len(impl) / 1000) if impl else None),
+        ('중복 읽기 KB', sum(r['dup_kb'] for r in rs)),
+        ('빠진 출력 재읽기 건', sum(r['reread'] for r in rs)),
+        ('문서(.md) 읽기 KB', sum(r['md_kb'] for r in rs)),
+        ('hook 이 막은 읽기 건', sum(r['blocked'] for r in rs)),
+        ('300줄 넘는 읽기 건', sum(r['over300'] for r in rs)),
+        ('수정 라운드 수', sum(1 for r in rs if re.search(r'수정\s*\d+', r['label'] or ''))),
+    ])
+
+
+def dw(s):
+    import unicodedata
+    return sum(2 if unicodedata.east_asian_width(ch) in 'WF' else 1 for ch in s)
+
+
+def pad(s, w):
+    while dw(s) > w:
+        s = s[:-1]
+    return s + ' ' * (w - dw(s))
+
+
+def median(xs):
+    xs = sorted(xs)
+    return xs[len(xs) // 2] if xs else 0
+
+
+def fmt_v(v):
+    if v is None:
+        return '-'
+    return f'{v:.0f}' if abs(v) >= 10 or v == int(v) else f'{v:.1f}'
+
+
+def trend(cur, prev):
+    if cur is None or prev is None:
+        return ' '
+    if prev == 0:
+        return '=' if cur == 0 else '▲'
+    d = (cur - prev) / prev
+    return '=' if abs(d) < 0.05 else ('▲' if d > 0 else '▼')
+
+
+def biggest_waste(rs):
+    st = run_stats(rs)
+    big = sorted((x for r in rs for x in r['top']), key=lambda x: -x['kb'])
+    cands = [
+        (sum(r['dup_kb'] for r in rs), f"중복 읽기 {sum(r['dup_kb'] for r in rs):.0f}KB"),
+        (sum(r['over300_kb'] for r in rs), f"300줄 넘는 읽기 {st['300줄 넘는 읽기 건']}건"),
+        (sum(x['kb'] for x in big if x['saved']), f"파일로 빠진 큰 출력 {sum(1 for x in big if x['saved'])}건"),
+    ]
+    kb, text = max(cands)
+    return text if kb > 0 else '뚜렷한 낭비 없음'
+
+
+def chart(rows, run=None):
+    """이력 줄들 → 한 run 의 터미널 그림(가로 100자 안쪽)."""
+    runs = group_runs(rows)
+    if not runs:
+        return '이력이 비었다.\n'
+    if run is None:
+        run = max(runs, key=lambda k: max(r['end'] for r in runs[k]))
+    if run not in runs:
+        return f'run {run} 이 이력에 없다.\n'
+    rs = sorted(runs[run], key=lambda r: r['start'])
+    keys = list(runs)
+    before = [k for k in keys[:keys.index(run)] if is_wf(k) == is_wf(run)]
+    prev = runs[before[-1]] if before else None
+    st, pst = run_stats(rs), (run_stats(prev) if prev else None)
+    L = []
+    # 1. 판정
+    if pst:
+        cur, p = st['끝 맥락 평균 K'], pst['끝 맥락 평균 K']
+        d = 100 * (cur - p) / p if p else 0
+        verdict = f"{'=' if abs(d) < 5 else ('▼' if d < 0 else '▲')} 끝 맥락 {'−' if d < 0 else '+'}{abs(d):.0f}% (지난 {before[-1]})"
+    else:
+        verdict = '● 비교할 지난 실행 없음'
+    L.append(f"{verdict} · 가장 큰 낭비: {biggest_waste(rs)}")
+    L.append(f"run {run} · agent {len(rs)}개 · 합 {sum(r['min'] for r in rs):.1f}분")
+    L.append('')
+    # 2. 막대
+    top_ctx = max(r['ctx_end'] for r in rs) or 1
+    W = 40
+    med = {}
+    for role in set(r['role'] for r in rs):
+        g = [r for r in rs if r['role'] == role]
+        med[role] = (median([r['min'] for r in g]), median([r['ctx_end'] for r in g]), len(g))
+    L.append(pad('agent', 16) + ' ' + pad('░ 시작 고정분  █ 작업 중 쌓임', W) + '  끝K   분  모델')
+    for r in rs:
+        a = round(W * r['ctx_first'] / top_ctx)
+        b = max(0, round(W * r['ctx_end'] / top_ctx) - a)
+        mm, mc, n = med[r['role']]
+        flag = ''
+        if n >= 2 and r['role'] != '기타' and ((mm and r['min'] >= 2 * mm) or (mc and r['ctx_end'] >= 2 * mc)):
+            flag = ' ⚠이상치'
+        L.append(f"{pad(r['label'] or r['agent_id'], 16)} {pad('░' * a + '█' * b, W)} {r['ctx_end'] / 1000:4.0f} {r['min']:5.1f}  {r['model']}{flag}")
+    L.append('')
+    # 3. 신호 표
+    L.append(pad('신호', 22) + '   이번    지난  추세')
+    for k, v in st.items():
+        pv = pst[k] if pst else None
+        L.append(f"{pad(k, 22)} {fmt_v(v):>6}  {fmt_v(pv):>6}   {trend(v, pv)}")
+    growth = sum(max(0, r['ctx_end'] - r['ctx_first']) for r in rs)
+    expl = sum(r['explained_tok'] for r in rs)
+    if growth and (growth - expl) / growth > 0.3:
+        L.append(f"⚠ 맥락 증가의 {100 * (growth - expl) / growth:.0f}% 가 읽기·쓰기·테스트 결과·출력으로 설명 안 된다(기타)")
+    L.append('')
+    # 4. 큰 결과 상위 3
+    L.append('가장 큰 도구 결과')
+    big = sorted(((x, r['label']) for r in rs for x in r['top']), key=lambda t: -t[0]['kb'])[:3]
+    for x, lab in big:
+        tag = ('[파일로 빠짐]' if x['saved'] else '') + ('[중복]' if x['dup'] else '')
+        L.append(f"  {x['kb']:6.1f}KB {lab or ''} {tag}".rstrip())
+        L.append(f"           {x['cmd'][:60]}")
+    L.append('')
+    # 5. 다음에 할 일
+    fix = [r['ctx_end'] for r in rs if r['role'] == '수정']
+    impl = st['구현 끝 맥락 평균 K']
+    if fix and impl and sum(fix) / len(fix) / 1000 >= 0.8 * impl:
+        todo = '수정 agent 끝 맥락이 구현급이다 → 과업을 더 잘게'
+    elif st['중복 읽기 KB'] > 50:
+        todo = '중복 읽기가 크다 → brief·지도 확인'
+    elif st['시작 고정분 K'] > 30:
+        todo = f"시작 고정분 {st['시작 고정분 K']:.0f}K → worker 타입 확인"
+    else:
+        todo = '두드러진 신호 없음'
+    L.append(f'다음: {todo}')
+    return '\n'.join(L) + '\n'
+
+
+def collect(src):
+    """폴더나 agent-*.jsonl → [(agentId, path, label)]"""
+    src = os.path.expanduser(src)
+    items = []
     if os.path.isdir(src):
         labels = {}
         jp = os.path.join(src, 'journal.jsonl')
         if os.path.exists(jp):
-            for l in open(jp, encoding='utf-8'):
-                try:
-                    d = json.loads(l)
-                except json.JSONDecodeError:
-                    continue
-                if d.get('type') == 'started' and d.get('agentId'):
-                    labels[d['agentId']] = d.get('label') or d['agentId']
+            with open(jp, encoding='utf-8') as fh:
+                for l in fh:
+                    try:
+                        d = json.loads(l)
+                    except json.JSONDecodeError:
+                        continue
+                    if d.get('type') == 'started' and d.get('agentId'):
+                        labels[d['agentId']] = d.get('label') or d['agentId']
         for p in glob.glob(os.path.join(src, 'agent-*.jsonl')):
             aid = os.path.basename(p)[len('agent-'):-len('.jsonl')]
-            lab = labels.get(aid)
-            if not lab:
-                mp = p[:-len('.jsonl')] + '.meta.json'
-                try:
-                    lab = json.load(open(mp)).get('description')
-                except Exception:
-                    lab = None
-            items.append((aid, p, lab or aid))
+            items.append((aid, p, labels.get(aid) or meta_label(p) or aid))
     else:
-        aid = os.path.basename(src)
-        mp = src[:-len('.jsonl')] + '.meta.json'
-        lab = None
-        try:
-            lab = json.load(open(mp)).get('description')
-        except Exception:
-            pass
-        items.append((aid, src, lab or aid))
+        aid = os.path.basename(src)[len('agent-'):-len('.jsonl')] if os.path.basename(src).startswith('agent-') else os.path.basename(src)
+        items.append((aid, src, meta_label(src) or aid))
+    return items
 
-    res = []
-    for aid, p, lab in items:
-        r = analyze(p, lab)
-        if r:
-            r['id'] = aid
-            res.append(r)
-    res.sort(key=lambda r: min((c['ts'] for c in r['calls']), default=dt.datetime.max.replace(tzinfo=dt.timezone.utc)) if False else r['path'])
-    # 시작 시각 순
-    def start(r):
-        recs = load_agent(r['path'])
-        ts = [P(x['timestamp']) for x in recs if x.get('timestamp')]
-        return min(ts) if ts else dt.datetime.max.replace(tzinfo=dt.timezone.utc)
-    res.sort(key=start)
 
+def meta_label(p):
+    try:
+        with open(p[:-len('.jsonl')] + '.meta.json', encoding='utf-8') as f:
+            return json.load(f).get('description')
+    except Exception:
+        return None
+
+
+def table(res, src, top):
     L = []
     L.append(f'# agent 비용 — {src}')
     L.append('')
@@ -333,19 +571,18 @@ def main():
         cells = [f"{r['kinds'][k][0]} / {r['kinds'][k][1]:.0f}s" for k in KINDS]
         L.append(f"| {r['label']} | " + ' | '.join(cells) + ' |')
     L.append('')
-    L.append(f'## agent 마다 가장 큰 도구 결과 {a.top}개')
+    L.append(f'## agent 마다 가장 큰 도구 결과 {top}개')
     for r in res:
         L.append('')
         dup_n = sum(1 for c in r['calls'] if c['dup'])
         L.append(f"### {r['label']} — 중복 읽기 {dup_n}건 {fmt_kb(r['dup_bytes'])}, 문서(.md) 읽기 {fmt_kb(r['md_bytes'])}/{fmt_kb(r['total_bytes'])}")
-        for c in sorted(r['calls'], key=lambda x: -x['size'])[:a.top]:
+        for c in sorted(r['calls'], key=lambda x: -x['size'])[:top]:
             tag = ''
             if c['saved']:
                 tag += ' [파일로 빠짐]'
             if c['dup']:
                 tag += f" [중복 읽기: {c.get('dup_of')}]"
             L.append(f"- {fmt_kb(c['size'])} {c['name']}/{c['kind']} {c['dur']:.1f}s{tag} — `{short(c['desc'])}`")
-    # 합계
     tot_span = sum(r['span'] for r in res)
     tot_tool = sum(r['tool_sec'] for r in res)
     tot_model = tot_span - tot_tool
@@ -362,7 +599,49 @@ def main():
     L.append(f'1. 모델 시간 비중 {mp:.0f}% — ' + ('시간 대부분이 도구가 아니라 모델의 읽고 생각하고 쓰는 시간이다. 턴 수와 맥락 크기를 줄이는 쪽이 효과가 크다.' if mp >= 70 else '도구 실행이 시간의 상당 부분이다. 테스트·빌드 범위를 좁히는 것이 먼저다.'))
     L.append(f'2. 문서 읽기 비중 {dp:.0f}% ({fmt_kb(tot_md)}) — ' + ('.md(계획·결정·규칙) 읽기가 도구 결과의 큰 몫이다. task-brief.py 로 필요한 절만 건네면 줄어든다.' if dp >= 25 else '문서 읽기는 도구 결과의 작은 몫이다. 코드 읽기·출력이 더 크다.'))
     L.append(f'3. 중복 읽기 {fmt_kb(tot_dup)} — ' + ('같은 파일·범위나 파일로 빠진 결과를 다시 읽었다. 빠진 결과는 처음부터 grep/sed -n 으로 좁혀 부르게 한다.' if tot_dup > 0 else '중복 읽기가 없다.'))
-    text = '\n'.join(L) + '\n'
+    return '\n'.join(L) + '\n'
+
+
+def main():
+    ap = argparse.ArgumentParser(description='subagent 비용: 표(기본) · --history 로 이력에 쌓기 · --chart 로 터미널 그림')
+    ap.add_argument('src', nargs='?', help='워크플로우 transcript 폴더 또는 agent-*.jsonl (--chart 만 쓰면 생략 가능)')
+    ap.add_argument('--top', type=int, default=5)
+    ap.add_argument('--md')
+    ap.add_argument('--history', nargs='?', const=HIST_DIR, help=f'src 의 agent 마다 한 줄을 이력에 더한다(기본 폴더 {HIST_DIR}, 월별 history-YYYY-MM.jsonl; .jsonl 을 주면 그 파일 하나)')
+    ap.add_argument('--chart', action='store_true', help='이력에서 run 하나를 그린다(기본: src 의 run, 없으면 가장 최근 run)')
+    ap.add_argument('--run', help='--chart 로 그릴 run id(wf_… 또는 agent id)')
+    a = ap.parse_args()
+    hist = os.path.expanduser(a.history or HIST_DIR)
+
+    res = []
+    if a.src:
+        for aid, p, lab in collect(a.src):
+            r = analyze(p, lab)
+            if r:
+                r['id'] = aid
+                res.append(r)
+        res.sort(key=lambda r: r['start'])
+    elif not a.chart:
+        ap.error('src 가 필요하다(--chart 만 쓸 때는 생략 가능)')
+
+    rows_src = [summarize(r, r['id']) for r in res]
+    if a.history is not None:
+        added = sum(append_row(hist, row) for row in rows_src)
+        sys.stderr.write(f'이력: {added}줄 더함, {len(rows_src) - added}줄 이미 있음\n')
+
+    if a.chart:
+        now = dt.datetime.now(UTC).strftime('%Y-%m')
+        months = {now, prev_month(now)} | {month_of(r['end']) for r in rows_src} | {prev_month(month_of(r['end'])) for r in rows_src}
+        rows = read_rows(hist_files(hist, sorted(months)))
+        have = {r['agent_id'] for r in rows}
+        rows += [r for r in rows_src if r['agent_id'] not in have]
+        run = a.run or (rows_src[0]['run'] if rows_src else None)
+        sys.stdout.write(chart(rows, run))
+        return
+
+    if a.history is not None and not a.md:
+        return
+    text = table(res, a.src, a.top)
     sys.stdout.write(text)
     if a.md:
         os.makedirs(os.path.dirname(os.path.abspath(a.md)), exist_ok=True)

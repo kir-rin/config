@@ -36,7 +36,10 @@
     계획 문서 옆 `sdd/<계획 이름>/` — 코드 레포·공유 레포 안(예: `.superpowers/`)에 두지 않는다.
     subagent 는 `worker` 타입(MCP·스킬 없음, `~/config/claude/agents/worker.md`)으로 띄운다 — Workflow 는 `agent(prompt, { agentType: 'worker' })`.
     (2026-10-28 측정: 일반 subagent 첫 턴 48,484 → worker 14,003 토큰. 이 세션 subagent 259개 중 MCP 도구 호출 0번, 스킬 4번.)
-    계획 실행이 끝나면 `subagent-templates/agent-cost.py <워크플로우 transcript 폴더> --md sdd/<계획>/cost.md` 로 agent 별 시간·맥락·중복 읽기를 남긴다.
+    비용은 자동으로 쌓인다: subagent·워크플로우 agent 가 하나 끝날 때마다 전역 SubagentStop hook(`hooks/agent-cost-hook.py`)이
+    이력(`~/.claude/agent-cost/history-YYYY-MM.jsonl`)에 그 agent 한 줄을 더한다(run = 워크플로우 폴더 `wf_…` 또는 agent id).
+    메인은 워크플로우·subagent 결과 알림을 받으면 `subagent-templates/agent-cost.py --chart --run <id>` 를 한 번 돌려 대화창에 보여 준다.
+    대시보드(아티팩트)와 `--md` 표는 요청할 때만.
 12. **눈으로 볼 수 있는 한 줄을 먼저, 그리고 자주 멈춰 본다.** (2026-10-28 — 엔진을 몰아 만들고 화면을 맨 끝에 붙여
     「돌지만 원하던 게 아님」이 늦게 보였다)
     - 계획의 첫 과업은 walking skeleton: 화면→엔진→DB 를 관통해 대표 흐름 한 건이 끝까지 도는 최소 동작.

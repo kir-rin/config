@@ -2,6 +2,7 @@
 # 다른 기기에 Claude Code 개인 설정을 깐다(2026-10-28).
 #  - 전역 지침 목차: config/claude/global/CLAUDE.md → ~/.claude/CLAUDE.md (기존 파일은 .bak 으로 남김)
 #  - subagent 타입: config/claude/agents/*.md → ~/.claude/agents/ 링크
+#  - agent-cost hook(SubagentStop) 은 전역 ~/.claude/settings.json 에 등록한다(이미 있으면 건너뜀)
 #  - read-guard hook 은 프로젝트별(.claude/settings.local.json)로 등록한다 — 인자로 프로젝트 경로를 주면 등록
 # 사용: bash ~/config/claude/install.sh [hook 을 걸 프로젝트 경로 ...]
 set -euo pipefail
@@ -17,6 +18,23 @@ cp "$C/global/CLAUDE.md" ~/.claude/CLAUDE.md
 for a in "$C"/agents/*.md; do
   ln -sf "$a" ~/.claude/agents/"$(basename "$a")"
 done
+
+python3 - ~/.claude/settings.json "$C/hooks/agent-cost-hook.py" <<'PY'
+import json, os, sys
+f, hook = sys.argv[1], sys.argv[2]
+s = json.load(open(f)) if os.path.exists(f) else {}
+cmd = f"python3 {hook}"
+lst = s.setdefault("hooks", {}).setdefault("SubagentStop", [])
+if any(h.get("command") == cmd for e in lst for h in e.get("hooks", [])):
+    print("agent-cost hook: 이미 등록됨")
+else:
+    lst.append({"hooks": [{"type": "command", "command": cmd, "timeout": 5}]})
+    tmp = f + ".tmp"
+    with open(tmp, "w") as fh:
+        json.dump(s, fh, ensure_ascii=False, indent=2)
+    os.replace(tmp, f)
+    print("agent-cost hook 등록:", f)
+PY
 
 for p in "$@"; do
   f="$p/.claude/settings.local.json"
