@@ -15,4 +15,4 @@
 이유: 요약만 보고 요청을 잘못 읽거나 빠뜨렸고, 회의 직후 받은 첨부를 안 봤고, 다른 과제 항목을 「계획」으로 남겨
 회의에서 정한 기능을 아무도 안 했고, push 안 된 로컬 커밋이 쌓여 배포가 막힌 적이 있다.
 
-각 기기의 `~/.claude/CLAUDE.md` 에서 `@~/config/claude/meeting-intake.md` 로 불러온다.
+전역 지침 목차(`~/.claude/CLAUDE.md`, 사본 `~/config/claude/global/CLAUDE.md`)에서 상황별로 가리킨다 — 자동으로 불러오지 않는다.

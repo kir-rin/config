@@ -7,4 +7,4 @@
 - 진행 기록은 집 맥 `~/affine-selfhost/_state/progress.md`. 토큰 파일(`_state/mcp-credential.*`)은 출력하지 않는다.
 - 회사 맥의 `~/affine-selfhost/README.md` 는 사본이다. 서버 구성을 바꾸면 집 맥 정본을 다시 복사한다.
 
-각 기기의 `~/.claude/CLAUDE.md` 에서 `@~/config/claude/affine.md` 로 불러온다.
+전역 지침 목차(`~/.claude/CLAUDE.md`, 사본 `~/config/claude/global/CLAUDE.md`)에서 상황별로 가리킨다 — 자동으로 불러오지 않는다.
