@@ -366,12 +366,15 @@ def check_fix_files(tl, meta, tpath, repo):
 
 def folder_main(a):
     d = a.plan
-    m = re.fullmatch(r'0*(\d+)', a.task)
-    if not m:
-        sys.exit('폴더 계획의 과업번호는 01 또는 1 형식이어야 한다')
-    n = int(m.group(1))
     tdir = os.path.join(d, 'tasks')
-    cands = [f for f in sorted(os.listdir(tdir)) if f.endswith('.md') and re.match(r'0*(\d+)\b', f) and int(re.match(r'0*(\d+)', f).group(1)) == n] if os.path.isdir(tdir) else []
+    files = [f for f in sorted(os.listdir(tdir)) if f.endswith('.md')] if os.path.isdir(tdir) else []
+    m = re.fullmatch(r'0*(\d+)', a.task)
+    if m:
+        n = int(m.group(1))
+        cands = [f for f in files if re.match(r'0*(\d+)\b', f) and int(re.match(r'0*(\d+)', f).group(1)) == n]
+    else:
+        # 01f-a 처럼 숫자 뒤에 글자가 붙은 과업 — 파일 이름이 「<id>-」로 시작하거나 id 와 같다
+        cands = [f for f in files if f[:-3] == a.task or f.startswith(a.task + '-')]
     if not cands:
         sys.exit(f'과업 {a.task} 파일 없음: {tdir}/NN-<slug>.md')
     tpath = os.path.join(tdir, cands[0])
