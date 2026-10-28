@@ -64,7 +64,7 @@ Claude Code 는 프로젝트 `.claude/workflows/` 와 홈 `~/.claude/workflows/`
 - **구현:** 첫 줄 `고칠 파일: brief 의 「## 고칠 파일」 그대로`(dispatch-guard 용). brief · implementer.md · recurring-findings.md 경로를 준다. 「이름을 알면 LSP, 모를 때만 FLOW.md」「명령은 묶어서」「크기 상한은 경고 — 깎지 말고 보고」. 전체 시험은 커밋 직전에만.
 - **검토:** 첫 줄 `검토:`. reviewer.md 기준. `git diff --stat` 먼저, 생성·잠금·남의 부품만 빼고 파일별로 읽는다.
 - **수정:** brief 전체를 다시 읽히지 않는다. 지적 JSON + brief 의 고칠 파일 절(grep 으로 찾아 sed -n) + 보고서의 해당 절만. minor 는 고치지 않는다.
-- **컨트롤러 결정:** summary 에 「컨트롤러」「결정」「편차」「decisions」가 있는 지적은 수정 agent 를 띄우지 않고 결과 `needs_controller` 로 올린다(그 과업은 승인 안 됨 → 갈래 멈춤). 나머지 지적은 고친다.
+- **컨트롤러 결정:** summary 에 「컨트롤러 결정 필요」가 있는 지적은 수정 agent 를 띄우지 않고 결과 `needs_controller` 로 올린다(그 과업은 승인 안 됨 → 갈래 멈춤). 나머지 지적은 고친다.
 - **재검토 생략:** critical 없음 · 지적 1개 · 바뀐 파일 2개 이하.
 - **수정 라운드 최대 2번**, 2번째는 opus.
 - **합치기**(merge): 첫 줄 `고칠 파일: 충돌 난 파일만`, sonnet. 체크포인트는 main 쪽 갈래가 모두 승인되고 합치기가 막히지 않았을 때만(합치지 못한 갈래는 `unmerged` 로).
