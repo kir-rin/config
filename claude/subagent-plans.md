@@ -20,6 +20,7 @@
    brief 와 계획의 「Interfaces」 정본이 다르면 정본이 이긴다고 dispatch 에 적는다. 파일 경로·diff 파일·이전 판정을 직접 건네 탐색 턴을 줄인다.
    dispatch 전에 `subagent-templates/task-brief.py <계획> <과업번호> --out <brief>` 로 brief 를 뽑아 그 경로만 준다(계획 전체·결정 파일 통째로 읽히지 않는다). 계획은 폴더 형식(plan.md·constraints.md·interfaces.md·tasks/NN.md)으로 쓰고, brief 는 추측 없이 이어 붙인다.
    결정 파일(decisions.md)의 각 결정에는 `[tags: a, b]` 를 달아 둔다 — brief 가 과업 태그와 겹치는 결정만 고른다(`always` 는 늘 포함).
+   구현·수정 dispatch 에는 `고칠 파일:`(path:줄)을 적는다. 계획 과업은 `## 고칠 파일` 절이 필수다(task-brief 가 막는다). 즉석 지시는 dispatch-guard hook 이 막는다. 조사·검토는 첫 줄 `조사:`/`검토:`.
 5. **작은 일은 묶어서 한 agent 에게.** 같은 종류 수정 여러 개를 과업마다 따로 돌리지 않는다.
    **반대로 큰 일·서로 독립인 일은 한 agent 에 몰아넣지 않는다** — 따로 떼어 병렬로(필요하면 worktree) 돌린다.
    (2026-10-28: 합치기 + 본 과업 + 독립 기능 2개를 opus agent 하나에 넣었더니 느리고 검토도 무거워졌다.)

@@ -18,9 +18,9 @@ class FolderPlan(unittest.TestCase):
         (self.plan / 'interfaces.md').write_text(
             '# ifaces\n## I-alpha\nALPHA-BODY\n## I-beta\nBETA-BODY\n## I-gamma\nGAMMA-BODY\n')
         (self.plan / 'tasks' / '01-x.md').write_text(
-            '---\nid: 01\ntitle: X\nuses: [I-alpha]\nproduces: [I-beta]\ntags: [ui, pii]\n---\nTASKBODY\n')
+            '---\nid: 01\ntitle: X\nuses: [I-alpha]\nproduces: [I-beta]\ntags: [ui, pii]\n---\nTASKBODY\n## 고칠 파일\n- `src/a.ts`\n')
         (self.plan / 'tasks' / '02-y.md').write_text(
-            '---\nid: 02\ntitle: Y\nuses: [I-nope]\nproduces: []\ntags: [ui]\n---\nY\n')
+            '---\nid: 02\ntitle: Y\nuses: [I-nope]\nproduces: []\ntags: [ui]\n---\nY\n## 고칠 파일\n- `src/y.ts`\n')
         self.dec = r / 'decisions.md'
         self.dec.write_text('# d\n- 겹침 결정 [tags: pii, ops]\n- 무관 결정 [tags: export]\n'
                             '1. 항상 결정 [tags: always]\n2. 태그 없음\n')
@@ -52,6 +52,40 @@ class FolderPlan(unittest.TestCase):
         r = run(str(self.plan), '02', '--decisions', str(self.dec))
         self.assertEqual(r.returncode, 2)
         self.assertIn('I-nope', r.stderr)
+
+
+class FixFiles(unittest.TestCase):
+    def mk(self, body, front='tags: [ui]'):
+        self.t = tempfile.TemporaryDirectory()
+        self.addCleanup(self.t.cleanup)
+        plan = pathlib.Path(self.t.name) / 'plan'
+        (plan / 'tasks').mkdir(parents=True)
+        (plan / 'tasks' / '01-x.md').write_text(f'---\nid: 01\n{front}\n---\n{body}\n')
+        return str(plan)
+
+    def test_no_section_exit3(self):
+        r = run(self.mk('본문만'), '1')
+        self.assertEqual(r.returncode, 3)
+        self.assertIn('고칠 파일', r.stderr)
+
+    def test_no_path_exit3(self):
+        r = run(self.mk('## 고칠 파일\n- 없음\n'), '1')
+        self.assertEqual(r.returncode, 3)
+
+    def test_with_path_ok(self):
+        r = run(self.mk('## 고칠 파일\n- `src/a.ts:10`\n'), '1')
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_research_skips(self):
+        r = run(self.mk('조사만', front='kind: research'), '1')
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_repo_missing_warns_unless_new(self):
+        plan = self.mk('## 고칠 파일\n- `src/a.ts`\n- `src/b.ts` (새 파일)\n')
+        r = run(plan, '1', '--repo', self.t.name)
+        self.assertEqual(r.returncode, 0)
+        self.assertIn('src/a.ts', r.stderr)
+        self.assertNotIn('src/b.ts', r.stderr)
 
 
 class SingleFilePlan(unittest.TestCase):

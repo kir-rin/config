@@ -125,6 +125,7 @@ def main():
     ap.add_argument('task')
     ap.add_argument('--decisions')
     ap.add_argument('--out')
+    ap.add_argument('--repo', help='레포 루트. 주면 `## 고칠 파일` 경로가 있는지 확인한다(없으면 경고만)')
     a = ap.parse_args()
     if os.path.isdir(a.plan):
         return folder_main(a)
@@ -328,6 +329,41 @@ def numbered(lines, start=0):
     return '\n'.join(lines[start:]).rstrip()
 
 
+def check_fix_files(tl, meta, tpath, repo):
+    """`## 고칠 파일` 절에 백틱 경로가 하나도 없으면 exit 3. kind: research|review 는 건너뛴다."""
+    if meta.get('kind') in ('research', 'review'):
+        return
+    _, body0 = parse_front(tl)
+    sec, fence, inside = [], False, False
+    for ln in tl[body0:]:
+        if ln.startswith('```'):
+            fence = not fence
+        if not fence and re.match(r'^## ', ln):
+            inside = bool(re.match(r'^## 고칠 파일\s*$', ln))
+            continue
+        if inside:
+            sec.append(ln)
+    name = os.path.basename(tpath)
+    if not sec:
+        print(f'오류: {name} 에 `## 고칠 파일` 절이 없다. 고칠 파일을 백틱 경로(path:줄)로 적는다 '
+              f'(조사·검토 과업이면 front matter 에 kind: research|review).', file=sys.stderr)
+        sys.exit(3)
+    paths = []
+    for ln in sec:
+        for tok in re.findall(r'`([^`]+)`', ln):
+            t = re.sub(r':\d+(?:[-~]\d+)?$', '', tok)
+            if re.fullmatch(r'[\w./@+-]+', t) and ('/' in t or '.' in t):
+                paths.append((t, ln))
+    if not paths:
+        print(f'오류: {name} 의 `## 고칠 파일` 절에 백틱 경로(`path`)가 하나도 없다.', file=sys.stderr)
+        sys.exit(3)
+    if repo:
+        for t, ln in paths:
+            if not os.path.exists(os.path.join(os.path.expanduser(repo), t)):
+                if not re.search(r'\(새 파일\)|new:', ln):
+                    print(f'경고: {name}: 고칠 파일 `{t}` 이(가) 레포에 없다((새 파일) 표시도 없음).', file=sys.stderr)
+
+
 def folder_main(a):
     d = a.plan
     m = re.fullmatch(r'0*(\d+)', a.task)
@@ -345,6 +381,7 @@ def folder_main(a):
     if isinstance(tags, str):
         tags = [tags]
     tagset = set(tags)
+    check_fix_files(tl, meta, tpath, a.repo)
     want = []
     for k in ('uses', 'produces'):
         v = meta.get(k) or []
