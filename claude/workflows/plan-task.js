@@ -23,7 +23,7 @@ const W = A.sdd
 const TITLE = A.title || '계획'
 const MODELS = A.models || {}
 const VERIFY = A.verify || 'implementer.md 에 적힌 전체 시험'
-const CTRL_RE = /컨트롤러|결정|편차|decisions/i
+const CTRL_RE = /컨트롤러 결정 필요/
 
 const IMPL = { type: 'object', properties: { status: { type: 'string', enum: ['done', 'done_with_concerns', 'blocked'] }, base: { type: 'string' }, head: { type: 'string' }, files_changed: { type: 'number' }, tests: { type: 'string' }, concerns: { type: 'array', items: { type: 'string' } } }, required: ['status', 'base', 'head', 'tests', 'concerns'] }
 const REV = { type: 'object', properties: { verdict: { type: 'string', enum: ['approved', 'needs_fixes'] }, findings: { type: 'array', items: { type: 'object', properties: { severity: { type: 'string', enum: ['critical', 'important', 'minor'] }, where: { type: 'string' }, summary: { type: 'string' } }, required: ['severity', 'where', 'summary'] } } }, required: ['verdict', 'findings'] }
