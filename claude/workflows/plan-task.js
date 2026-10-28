@@ -51,11 +51,23 @@ function common(repo, branch) {
 - 보고서 ${W}/T{과업}-report.md(「AI 가 정한 것」 절 필수), ${W}/progress.md 에 한 줄.`
 }
 
+const where = t => `${W}/T${t}-where.md`
+const WHERE = { type: 'object', properties: { file: { type: 'string' }, spots: { type: 'number' } }, required: ['file', 'spots'] }
+
+// 위치표: 구현 전에 싼 모델이 「고칠 자리 = 파일:줄」 표를 만든다. 구현은 탐색 대신 이 표로 시작한다.
+function wherePrompt(t, repo) {
+  return `조사: ${TITLE} 과업 ${t} 의 고칠 자리 위치표(코드 수정·커밋 금지).
+brief ${brief(t)} 의 요구마다 레포 ${repo} 에서 고칠 자리를 찾는다. 이름을 알면 LSP(workspaceSymbol·goToDefinition·findReferences), 아니면 grep -n. 통째 읽기 금지, 필요한 줄만 sed -n. 명령은 묶어서.
+${A.design ? `디자인 값: ${A.design} 의 값을 그대로 쓸 자리도 적는다(시제품 폴더를 탐색하지 않는다).\n` : ''}${where(t)} 에 표로 쓴다: | 요구 | 파일:줄 | 지금 모양(한 줄) | 바꿀 것(한 줄) |. 새로 만들 파일은 「새 파일」, 못 찾은 요구는 「못 찾음 + 찾아본 곳」. 1페이지 안쪽.
+다른 subagent 금지. 반환: file, spots(찾은 자리 수).`
+}
+
 function implPrompt(t, repo, branch, setup) {
   return `고칠 파일: brief 의 「## 고칠 파일」 그대로
 ${TITLE} 과업 ${t} 를 구현한다.
 ${setup || ''}
 brief: ${brief(t)} — 요구사항 정본. 계획 폴더의 다른 파일·decisions.md 를 통째로 읽지 않는다.
+위치표: ${where(t)} — 고칠 자리는 여기서 시작한다(다시 찾지 않는다). 표가 틀렸을 때만 직접 찾고 보고서에 적는다.${A.design ? `\n디자인 값: ${A.design} 의 값을 그대로 쓴다. 시제품 폴더를 열어 보지 않는다.` : ''}
 ${common(repo, branch).replace('{과업}', t)}
 시작 전 git rev-parse HEAD 를 base 로. 반환: status, base, head, files_changed, tests, concerns.`
 }
@@ -84,6 +96,8 @@ function reReviewPrompt(t, repo, round, open, fb, head, parked) {
 
 async function task(t, repo, branch, setup) {
   const [m, rm] = modelsOf(t)
+  // worktree 갈래는 아직 worktree 가 없을 수 있어 main 레포에서 찾는다(같은 커밋에서 갈라지므로 줄 번호가 같다)
+  await agent(wherePrompt(t, setup && setup.startsWith('먼저') ? REPO : repo), { label: `${t} 위치표`, phase: 'Build', schema: WHERE, model: 'haiku', agentType: 'worker' })
   const impl = await agent(implPrompt(t, repo, branch, setup), { label: `${t} 구현`, phase: 'Build', schema: IMPL, model: m, agentType: 'worker' })
   if (!impl || impl.status === 'blocked') return { t, ok: false, impl }
   let head = impl.head, round = 0
@@ -156,9 +170,9 @@ ${REPO}(main) 에서 \`${A.checkpoint}\` 를 한 번 돌린다. 사내 프록시
 }
 
 phase('Cost')
-const where = A.session ? `${A.session}/subagents/workflows` : '~/.claude/projects/*/*/subagents/workflows'
+const wfDir = A.session ? `${A.session}/subagents/workflows` : '~/.claude/projects/*/*/subagents/workflows'
 const cost = await agent(`조사: 이 워크플로우 실행의 비용 기록(읽기 전용, 파일 수정·커밋 금지).
-1) ls -td ${where}/wf_* | head -1 로 가장 최근 워크플로우 폴더를 찾는다(지금 돌고 있는 이 실행이다).
+1) ls -td ${wfDir}/wf_* | head -1 로 가장 최근 워크플로우 폴더를 찾는다(지금 돌고 있는 이 실행이다).
 2) python3 ~/config/claude/subagent-templates/agent-cost.py <그 폴더> --chart 를 돌린다.
 3) 출력 전문을 줄이거나 고치지 말고 output 에 그대로 넣는다. 다른 subagent 금지. 반환: folder, output.`, { label: '비용 기록', phase: 'Cost', schema: COST, model: 'haiku', agentType: 'worker' })
 
