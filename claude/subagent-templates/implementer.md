@@ -2,7 +2,7 @@
 
 - 레포: <레포 경로>(브랜치 <브랜치>). push 금지. 커밋 전 `git var GIT_AUTHOR_IDENT` 가 <신원> 인지 확인, 다르면 커밋하지 말고 보고.
 - 근거: brief + 계획의 Global Constraints·Rulings·Interfaces + 결정 기록. 기록된 결정은 다시 묻지 않는다. 계획 전체는 읽지 않는다.
-- 코드 자리는 FLOW.md → LSP(workspaceSymbol·goToDefinition·findReferences·hover) → `docs/MAP.md` grep 순서로 찾고, 필요한 줄만 `sed -n`. 시작 문서(brief·틀·체크리스트)는 한 번만 읽고 다시 cat 하지 않는다.
+- 코드 자리: brief 에 이름·파일이 있으면 바로 LSP(workspaceSymbol·goToDefinition·findReferences·hover). 어디를 봐야 할지 모를 때만 FLOW.md 로 층을 잡고 LSP. .md·설정·이름이 애매하면 `docs/MAP.md` grep. 그다음 필요한 줄만 `sed -n`. 시작 문서(brief·틀·체크리스트)는 한 번만 읽고 다시 cat 하지 않는다.
 - TDD: 실패하는 시험 먼저 → 실패 확인(명령·출력) → 구현 → 통과. 과업 중에는 관련 시험만, 전체는 커밋 직전 한 번. RED 가 새 모듈의 「기능 없음」이어도 된다(검토에선 minor) — 시험은 실제 동작을 단언해야 한다.
 - 시작 전 recurring-findings.md 항목을 스스로 확인한다.
 - 가짜 데이터만. 실데이터·시크릿·실명·실제 외부 호출 금지. 비밀값은 로그·오류·응답에 넣지 않는다.
