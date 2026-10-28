@@ -54,6 +54,46 @@ class FolderPlan(unittest.TestCase):
         self.assertIn('I-nope', r.stderr)
 
 
+class DecisionSummary(unittest.TestCase):
+    def setUp(self):
+        self.t = tempfile.TemporaryDirectory()
+        self.addCleanup(self.t.cleanup)
+        r = pathlib.Path(self.t.name)
+        self.plan = r / 'plan'
+        (self.plan / 'tasks').mkdir(parents=True)
+        (self.plan / 'tasks' / '01-x.md').write_text(
+            '---\nid: 01\ntags: [ui]\n---\nB\n## 고칠 파일\n- `src/a.ts`\n')
+        self.long = '긴원문' * 100
+        self.dec = r / 'decisions.md'
+        self.dec.write_text(
+            '# d\n'
+            '- 요약있는 원문 문장 〔요약: 짧은요약 〕 [tags: ui]\n'
+            f'- {self.long} [tags: ui]\n'
+            '- 짧은 원문 [tags: ui]\n')
+
+    def test_summary_mode(self):
+        r = run(str(self.plan), '1', '--decisions', str(self.dec))
+        self.assertEqual(r.returncode, 0, r.stderr)
+        o = r.stdout
+        self.assertIn('- 짧은요약 (decisions.md L2)', o)
+        self.assertNotIn('요약있는 원문 문장', o)
+        self.assertIn('요약이다', o)
+
+    def test_no_summary_clipped_at_200(self):
+        o = run(str(self.plan), '1', '--decisions', str(self.dec)).stdout
+        self.assertIn('…(L3 원문)', o)
+        self.assertIn(self.long[:200], o)
+        self.assertNotIn(self.long[:201], o)
+        self.assertIn('- 짧은 원문 (decisions.md L4)', o)
+
+    def test_full_decisions(self):
+        o = run(str(self.plan), '1', '--decisions', str(self.dec), '--full-decisions').stdout
+        self.assertIn('요약있는 원문 문장', o)
+        self.assertIn(self.long, o)
+        self.assertNotIn('짧은요약', o)
+        self.assertNotIn('요약이다', o)
+
+
 class FixFiles(unittest.TestCase):
     def mk(self, body, front='tags: [ui]'):
         self.t = tempfile.TemporaryDirectory()

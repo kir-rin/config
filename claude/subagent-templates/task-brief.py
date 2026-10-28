@@ -2,14 +2,16 @@
 """(폴더 형식 계획이면 plan 폴더의 tasks/NN-*.md + constraints.md + interfaces.md 의 uses/produces 절 + 태그 맞는 결정을 추측 없이 이어 붙인다.)
 계획에서 과업 하나의 brief 를 뽑는다(표준 라이브러리만).
 
-사용: python3 task-brief.py <계획.md | 계획 폴더> <과업번호> [--decisions <decisions.md>] [--out <파일>]
+사용: python3 task-brief.py <계획.md | 계획 폴더> <과업번호> [--decisions <decisions.md>] [--out <파일>] [--full-decisions]
 
 뽑는 것
   - `### Task <N>` 절 전체
   - 공통 절(선행, Global Constraints, Rulings, Review Focus, 결정 원문, 사용자 결정 ...) 중
     과업 절이 가리키는 줄(식별자 겹침, T<N>·Ruling N 참조, 태그 겹침)
   - Interfaces 코드 블록은 과업 절에 나오는 식별자와 겹치는 줄만
-  - decisions.md 는 `[tags: a, b]` 가 과업 태그와 겹치거나 always 인 결정
+  - decisions.md 는 `[tags: a, b]` 가 과업 태그와 겹치거나 always 인 결정.
+    기본은 요약 모드: 결정 줄의 ` 〔요약: … 〕` 만 `- 요약 (decisions.md L줄)` 로 넣고,
+    요약이 없으면 원문을 200자에서 잘라 `…(L줄 원문)` 을 붙인다. `--full-decisions` 면 원문 전체.
 과업 절에 `태그: a, b` 줄이 있으면 그 태그, 없으면 절의 단어로 추정한다.
 크기가 8KB 를 넘으면 stderr 로 경고한다.
 """
@@ -115,6 +117,30 @@ def ruling_refs(text):
     return refs
 
 
+SUMMARY_RE = re.compile(r'\s*〔요약:\s*(.*?)\s*〕')
+SUMMARY_NOTE = '> 요약이다. 판단에 원문이 필요하면 decisions.md 해당 줄만 sed -n 으로 읽는다.'
+
+
+def clean_decision_line(first):
+    """결정 첫 줄에서 태그·요약 표식·불릿을 뗀다 -> (본문, 요약 or None)"""
+    m = SUMMARY_RE.search(first)
+    summ = m.group(1) if m else None
+    t = SUMMARY_RE.sub('', first)
+    t = re.sub(r'\s*\[tags:[^\]]*\]', '', t).rstrip()
+    t = re.sub(r'^(- )', '', t)
+    return t, summ
+
+
+def summary_entry(first, lineno, limit=200):
+    """요약 모드의 결정 한 줄."""
+    t, summ = clean_decision_line(first)
+    if summ:
+        return f'- {summ} (decisions.md L{lineno})'
+    if len(t) > limit:
+        return f'- {t[:limit]}…(L{lineno} 원문)'
+    return f'- {t} (decisions.md L{lineno})'
+
+
 def clip(s, n=420):
     return s if len(s) <= n else s[:n] + '…'
 
@@ -125,6 +151,7 @@ def main():
     ap.add_argument('task')
     ap.add_argument('--decisions')
     ap.add_argument('--out')
+    ap.add_argument('--full-decisions', action='store_true', help='결정 절에 요약 대신 원문 전체를 넣는다')
     ap.add_argument('--strict', action='store_true', help='과업이 넓으면(고칠 파일 10개 초과 · 층 5개 초과 · 시험 경로 없음) 경고 대신 exit 4')
     ap.add_argument('--repo', help='레포 루트. 주면 `## 고칠 파일` 경로가 있는지 확인한다(없으면 경고만)')
     a = ap.parse_args()
@@ -272,6 +299,8 @@ def main():
                 continue
             i += 1
         out.append(f'## 결정 (태그 {", ".join(ttags)} + always) — {dpath}')
+        if not a.full_decisions:
+            out.append(SUMMARY_NOTE)
         n = 0
         for st, en, hd, tg in blocks:
             if 'always' in tg or tg & tagset:
@@ -280,11 +309,14 @@ def main():
                 if refs and a.task not in refs and 'always' not in tg:
                     continue
                 n += 1
-                first = re.sub(r'\s*\[tags:[^\]]*\]', '', dl[st])
-                first = first[2:] if first.startswith('- ') else first
-                out.append(f'- (L{st + 1}, § {hd}) {clip(first, 300)}')
-                for x in dl[st + 1:min(en, st + 4)]:
-                    out.append(clip(x, 160))
+                if a.full_decisions:
+                    first = SUMMARY_RE.sub('', re.sub(r'\s*\[tags:[^\]]*\]', '', dl[st]))
+                    first = first[2:] if first.startswith('- ') else first
+                    out.append(f'- (L{st + 1}, § {hd}) {clip(first, 300)}')
+                    for x in dl[st + 1:min(en, st + 4)]:
+                        out.append(clip(x, 160))
+                else:
+                    out.append(summary_entry(dl[st], st + 1))
         if n == 0:
             out.append('(해당 결정 없음)')
         out.append('')
@@ -476,6 +508,8 @@ def folder_main(a):
         dl = read_lines(dpath)
         out.append(f'## 결정 (태그 {", ".join(tags)} + always) — {dpath}')
         out.append('')
+        if not a.full_decisions:
+            out += [SUMMARY_NOTE, '']
         i, n_hit, head = 0, 0, ''
         while i < len(dl):
             ln = dl[i]
@@ -489,8 +523,11 @@ def folder_main(a):
                 tg = {t.strip() for t in mm.group(1).split(',')} if mm else set()
                 if 'always' in tg or tg & tagset:
                     n_hit += 1
-                    out.append(f'(decisions L{i + 1}, § {head})')
-                    out += dl[i:j]
+                    if a.full_decisions:
+                        out.append(f'(decisions L{i + 1}, § {head})')
+                        out += [SUMMARY_RE.sub('', x) for x in dl[i:j]]
+                    else:
+                        out.append(summary_entry(dl[i], i + 1))
                 i = j
                 continue
             i += 1
