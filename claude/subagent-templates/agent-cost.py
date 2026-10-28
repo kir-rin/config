@@ -4,6 +4,7 @@
 사용: python3 agent-cost.py <워크플로우 transcript 폴더 또는 agent-*.jsonl> [--top 5] [--md <출력.md>]
       python3 agent-cost.py <src> --history [폴더|파일.jsonl]   # agent 마다 한 줄을 이력에(이미 있는 agent id 는 건너뜀)
       python3 agent-cost.py [src] --chart [--run <id>]           # 이력에서 run 하나를 터미널 그림으로
+      python3 agent-cost.py <wf 폴더> --rebuild-run <wf id>      # 이력에서 그 run 줄만 지우고 다시 계산해 넣는다(신호를 새로 더했을 때)
 이력: ~/.claude/agent-cost/history-YYYY-MM.jsonl(달 = agent 가 끝난 시각, UTC). run = 기록 경로의 workflows/wf_… 폴더 이름, 없으면 agent id.
 --chart 의 run 묶기·「지난 실행」(같은 종류: 워크플로우끼리, 단독끼리)은 이번 달·지난달 파일에서 찾는다.
 
@@ -108,6 +109,34 @@ def classify_bash(cmd):
     return 'read' if 'read' in kinds else 'other'
 
 
+FILE_WRITE_RE = re.compile(r'(<<-?\s*[\'"]?\w+|\btee\b|\bsed\s+-i|open\([^)]*[\'"][wa]b?[\'"]|write_text|writeFile)')
+REDIRECT_RE = re.compile(r'(?<![=<>-])>>?\s*[\w./~$"\']')
+FULL_TEST_RE = re.compile(r'((npm|pnpm|yarn)\s+(run\s+)?test(:[\w-]+)?\b|\btest:golden\b|\bvitest\b|\bpytest\b|node\s+--test|tsx\s+--test)')
+SCOPED_RE = re.compile(r'(\.(test|spec)\.\w+|\S+/\S+\.(ts|js|mjs|py)\b|\s-t\s|--grep|\s-k\s|--filter|--testNamePattern|--test-name-pattern|vitest\s+run\s+\S|\s--\s+\S)')
+SEVERITIES = ('critical', 'important', 'minor')
+
+
+def is_file_write(name, inp):
+    """파일을 실제로 쓰는 호출인가(Write·Edit 류, heredoc·리다이렉트·python 쓰기). mkdir·rm 같은 것은 아니다."""
+    if name in ('Write', 'Edit', 'NotebookEdit', 'MultiEdit'):
+        return True
+    if name != 'Bash':
+        return False
+    cmd = inp.get('command', '')
+    return bool(FILE_WRITE_RE.search(cmd) or REDIRECT_RE.search(strip_quotes(cmd)))
+
+
+def is_full_test(name, inp):
+    if name != 'Bash':
+        return False
+    cmd = inp.get('command', '')
+    return bool(FULL_TEST_RE.search(cmd)) and not SCOPED_RE.search(cmd)
+
+
+def is_failed_result(c, text):
+    return bool(c.get('is_error')) or bool(re.match(r'\s*Exit code [1-9]', text))
+
+
 def classify(name, inp):
     if name in ('Read', 'Grep', 'Glob'):
         return 'read'
@@ -196,6 +225,8 @@ def analyze(path, label, max_bytes=None):
     msgs = collections.OrderedDict()
     uses = {}
     model = None
+    start_turns = None  # 첫 파일 쓰기 앞의 assistant 턴 수
+    findings = None     # 마지막 StructuredOutput 의 findings 심각도별 개수
     for r in recs:
         if r.get('type') == 'assistant':
             m = r['message']
@@ -204,7 +235,17 @@ def analyze(path, label, max_bytes=None):
             msgs[mid] = m.get('usage') or msgs.get(mid)
             for c in m.get('content', []):
                 if c.get('type') == 'tool_use':
-                    uses[c['id']] = dict(name=c['name'], input=c.get('input') or {}, ts=P(r['timestamp']))
+                    inp0 = c.get('input') or {}
+                    uses[c['id']] = dict(name=c['name'], input=inp0, ts=P(r['timestamp']))
+                    if start_turns is None and is_file_write(c['name'], inp0):
+                        start_turns = list(msgs).index(mid)
+                    if c['name'] == 'StructuredOutput':
+                        fl = inp0.get('findings')
+                        findings = {k: 0 for k in SEVERITIES}
+                        for f in fl if isinstance(fl, list) else []:
+                            sev = str(f.get('severity', '')).lower() if isinstance(f, dict) else ''
+                            if sev in findings:
+                                findings[sev] += 1
     ctx = []
     out_tok = 0
     for u in msgs.values():
@@ -214,6 +255,8 @@ def analyze(path, label, max_bytes=None):
         out_tok += u.get('output_tokens', 0)
     kinds = {k: [0, 0.0] for k in KINDS}
     calls = []
+    failed = full_tests = 0
+    failed_tests = set()
     for r in recs:
         if r.get('type') == 'user' and isinstance(r['message'].get('content'), list):
             for c in r['message']['content']:
@@ -223,6 +266,16 @@ def analyze(path, label, max_bytes=None):
                 dur = max(0.0, (P(r['timestamp']) - u['ts']).total_seconds())
                 text = result_text(c)
                 k = classify(u['name'], u['input'])
+                cmd_key = ' '.join(str(u['input'].get('command', '')).split())
+                bad = is_failed_result(c, text)
+                if k == 'test' and cmd_key in failed_tests:
+                    bad = True  # 이미 실패한 같은 테스트 명령을 다시 돌림
+                if bad:
+                    failed += 1
+                    if k == 'test':
+                        failed_tests.add(cmd_key)
+                if is_full_test(u['name'], u['input']):
+                    full_tests += 1
                 kinds[k][0] += 1
                 kinds[k][1] += dur
                 orig = len(text.encode('utf-8'))
@@ -265,7 +318,8 @@ def analyze(path, label, max_bytes=None):
     tool_sec = sum(c['dur'] for c in calls)
     return dict(label=label, path=path, model=model or '?', span=span, start=min(stamps), end=max(stamps), turns=len(msgs), records=sum(1 for r in recs if r.get('type') == 'assistant'),
                 ctx=ctx, out_tok=out_tok, tool_sec=tool_sec, model_sec=max(0.0, span - tool_sec), kinds=kinds, calls=calls,
-                dup_bytes=dup_bytes, md_bytes=md_bytes, total_bytes=total_bytes)
+                dup_bytes=dup_bytes, md_bytes=md_bytes, total_bytes=total_bytes,
+                start_turns=start_turns, failed=failed, full_tests=full_tests, findings=findings)
 
 
 def fmt_kb(n):
@@ -315,7 +369,11 @@ def summarize(r, agent_id):
         min=round(r['span'] / 60, 2), turns=r['turns'], ctx_first=c[0], ctx_end=c[-1], out_tok=r['out_tok'],
         dup_kb=round(r['dup_bytes'] / 1024, 1), reread=len(reread), md_kb=round(r['md_bytes'] / 1024, 1),
         blocked=sum(1 for x in calls if x['blocked']), over300=len(big), over300_kb=round(sum(x['shown'] for x in big) / 1024, 1),
-        result_kb=round(r['total_bytes'] / 1024, 1), explained_tok=int(explained), top=top)
+        result_kb=round(r['total_bytes'] / 1024, 1), explained_tok=int(explained), top=top,
+        start_turns=(r['start_turns'] if role_of(r['label']) in ('구현', '수정') else None),
+        failed=r['failed'], full_tests=r['full_tests'],
+        find=([r['findings'].get(k, 0) for k in SEVERITIES] if r['findings'] is not None
+              else ([0, 0, 0] if role_of(r['label']) in ('검토', '재검토') else None)))
 
 
 def month_of(iso):
@@ -372,6 +430,31 @@ def append_row(hist, row):
             fcntl.flock(f, fcntl.LOCK_UN)
 
 
+def delete_runs(hist, runs):
+    """월별 이력 파일들에서 run 이 runs 에 든 줄을 지운다. 지운 줄 수."""
+    import fcntl
+    files = [hist] if hist.endswith('.jsonl') else sorted(glob.glob(os.path.join(hist, 'history-*.jsonl')))
+    n = 0
+    for fp in files:
+        if not os.path.exists(fp):
+            continue
+        with open(fp, 'r+', encoding='utf-8') as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            keep = []
+            for l in f:
+                try:
+                    if json.loads(l).get('run') in runs:
+                        n += 1
+                        continue
+                except json.JSONDecodeError:
+                    pass
+                keep.append(l)
+            f.seek(0)
+            f.truncate()
+            f.writelines(keep)
+    return n
+
+
 def group_runs(rows):
     """run 별 agent 줄 목록, 시작 시각 순 run 목록."""
     runs = collections.OrderedDict()
@@ -382,6 +465,18 @@ def group_runs(rows):
 
 def is_wf(run):
     return run.startswith('wf_')
+
+
+def _avg(xs):
+    return sum(xs) / len(xs) if xs else None
+
+
+def _finds(rs):
+    """검토 agent 의 [심각, 중요, 사소] 합. 이 칸이 없는 옛 줄뿐이면 None."""
+    fs = [r['find'] for r in rs if r.get('find')]
+    if not fs:
+        return None
+    return [sum(f[i] for f in fs) for i in range(3)]
 
 
 def run_stats(rs):
@@ -397,6 +492,11 @@ def run_stats(rs):
         ('hook 이 막은 읽기 건', sum(r['blocked'] for r in rs)),
         ('300줄 넘는 읽기 건', sum(r['over300'] for r in rs)),
         ('수정 라운드 수', sum(1 for r in rs if re.search(r'수정\s*\d+', r['label'] or ''))),
+        ('착수까지 턴', _avg([r['start_turns'] for r in rs if r.get('start_turns') is not None]) if any('start_turns' in r for r in rs) else None),
+        ('쓴 양 K', (max([r['out_tok'] for r in rs if r['role'] in ('구현', '수정')] or [0]) / 1000) if rs else None),
+        ('헛돈 시도', sum(r['failed'] for r in rs) if all('failed' in r for r in rs) else None),
+        ('전체 테스트 실행 수', sum(r['full_tests'] for r in rs) if all('full_tests' in r for r in rs) else None),
+        ('검토 지적(심각·중요·사소)', _finds(rs)),
     ])
 
 
@@ -418,13 +518,17 @@ def median(xs):
 
 def fmt_v(v):
     if v is None:
-        return '-'
+        return '—'
+    if isinstance(v, list):
+        return f'심각 {v[0]} · 중요 {v[1]} · 사소 {v[2]}'
     return f'{v:.0f}' if abs(v) >= 10 or v == int(v) else f'{v:.1f}'
 
 
 def trend(cur, prev):
     if cur is None or prev is None:
         return ' '
+    if isinstance(cur, list):
+        cur, prev = sum(cur), sum(prev)
     if prev == 0:
         return '=' if cur == 0 else '▲'
     d = (cur - prev) / prev
@@ -489,6 +593,9 @@ def chart(rows, run=None):
     L.append(pad('신호', 28) + '   이번    지난  추세')
     for k, v in st.items():
         pv = pst[k] if pst else None
+        if isinstance(v, list) or isinstance(pv, list):
+            L.append(f"{pad(k, 28)} {fmt_v(v)}   (지난 {fmt_v(pv)}) {trend(v, pv)}")
+            continue
         L.append(f"{pad(k, 28)} {fmt_v(v):>6}  {fmt_v(pv):>6}   {trend(v, pv)}")
     growth = sum(max(0, r['ctx_end'] - r['ctx_first']) for r in rs)
     expl = sum(r['explained_tok'] for r in rs)
@@ -506,7 +613,13 @@ def chart(rows, run=None):
     # 5. 다음에 할 일
     fix = [r['ctx_end'] for r in rs if r['role'] == '수정']
     impl = st['구현 마칠 때 대화 길이 K']
-    if fix and impl and sum(fix) / len(fix) / 1000 >= 0.8 * impl:
+    if (st['착수까지 턴'] or 0) > 15:
+        todo = f"착수까지 턴 {st['착수까지 턴']:.0f} → 과업 파일에 고칠 파일·줄 위치를 더 적기"
+    elif (st['쓴 양 K'] or 0) > 50:
+        todo = f"쓴 양 {st['쓴 양 K']:.0f}K 인 구현이 있다 → 계획에 시그니처를 박기(규칙 13)"
+    elif (st['헛돈 시도'] or 0) > 5:
+        todo = f"헛돈 시도 {st['헛돈 시도']} → 막힌 원인 확인"
+    elif fix and impl and sum(fix) / len(fix) / 1000 >= 0.8 * impl:
         todo = '수정 agent 의 마칠 때 대화 길이가 구현급이다 → 과업을 더 잘게'
     elif st['같은 내용 다시 읽은 양 KB'] > 50:
         todo = '같은 내용을 많이 다시 읽었다 → brief·지도 확인'
@@ -609,6 +722,7 @@ def main():
     ap.add_argument('--md')
     ap.add_argument('--history', nargs='?', const=HIST_DIR, help=f'src 의 agent 마다 한 줄을 이력에 더한다(기본 폴더 {HIST_DIR}, 월별 history-YYYY-MM.jsonl; .jsonl 을 주면 그 파일 하나)')
     ap.add_argument('--chart', action='store_true', help='이력에서 run 하나를 그린다(기본: src 의 run, 없으면 가장 최근 run)')
+    ap.add_argument('--rebuild-run', action='append', metavar='ID', help='이력에서 이 run 의 줄만 지우고 src 로 다시 계산해 넣는다(여러 번 쓸 수 있음). src 는 그 run 의 폴더')
     ap.add_argument('--run', help='--chart 로 그릴 run id(wf_… 또는 agent id)')
     a = ap.parse_args()
     hist = os.path.expanduser(a.history or HIST_DIR)
@@ -625,7 +739,16 @@ def main():
         ap.error('src 가 필요하다(--chart 만 쓸 때는 생략 가능)')
 
     rows_src = [summarize(r, r['id']) for r in res]
-    if a.history is not None:
+    if a.rebuild_run:
+        if not a.src:
+            ap.error('--rebuild-run 에는 src 가 필요하다')
+        removed = delete_runs(hist, set(a.rebuild_run))
+        rows_src = [x for x in rows_src if x['run'] in set(a.rebuild_run)]
+        added = sum(append_row(hist, row) for row in rows_src)
+        sys.stderr.write(f'이력: {removed}줄 지움, {added}줄 새로 넣음\n')
+        if not a.chart:
+            return
+    elif a.history is not None:
         added = sum(append_row(hist, row) for row in rows_src)
         sys.stderr.write(f'이력: {added}줄 더함, {len(rows_src) - added}줄 이미 있음\n')
 

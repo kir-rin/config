@@ -12,6 +12,7 @@
   비교는 표로, 파일은 `path:line`. 사용자가 「자세히」라고 할 때만 넘긴다. 상세 → `~/config/claude/global/answer-format.md`.
 - **subagent 는 `worker` 타입으로 띄운다**(MCP·스킬 없이 파일·셸·웹 도구만 — 시작 맥락 약 48K → 14K).
   Workflow 스크립트에서는 `agent(..., { agentType: 'worker' })`. MCP·스킬·Artifact 가 꼭 필요한 일만 다른 타입으로.
+- 워크플로우·subagent 결과를 받으면 `agent-cost.py --chart --run <id>` 그림을 짧게 함께 보여 준다(`agent-cost` 스킬).
 
 ## 이럴 때 이 파일을 먼저 읽는다
 | 상황 | 읽을 것 |

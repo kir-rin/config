@@ -46,6 +46,27 @@ def make_agent(folder, aid, label, day='2026-10-28', hour=1, ctx=(60000, 90000))
     return p
 
 
+def make_signal_agent(folder, aid, label, steps, day='2026-10-28', hour=1):
+    """steps = [(name, input, result_text, is_error)] — 호출마다 assistant 턴 하나."""
+    os.makedirs(folder, exist_ok=True)
+    p = os.path.join(folder, f'agent-{aid}.jsonl')
+    t = lambda m: f'{day}T{hour:02d}:{m:02d}:00.000Z'
+    recs = [{'type': 'user', 'timestamp': t(0), 'message': {'content': 'go'}}]
+    for i, (name, ip, res, err) in enumerate(steps):
+        recs.append({'type': 'assistant', 'timestamp': t(1 + i), 'message': {'id': f'm{i}', 'model': 'claude-sonnet-5-5',
+                     'usage': {'input_tokens': 1000, 'output_tokens': 10},
+                     'content': [{'type': 'tool_use', 'id': f'u{i}', 'name': name, 'input': ip}]}})
+        tr = {'type': 'tool_result', 'tool_use_id': f'u{i}', 'content': res}
+        if err:
+            tr['is_error'] = True
+        recs.append({'type': 'user', 'timestamp': t(1 + i), 'message': {'content': [tr]}})
+    with open(p, 'w') as f:
+        f.write('\n'.join(json.dumps(r) for r in recs) + '\n')
+    with open(p[:-6] + '.meta.json', 'w') as f:
+        json.dump({'description': label}, f)
+    return p
+
+
 def inp(path, aid):
     return {'hook_event_name': 'SubagentStop', 'agent_id': aid, 'agent_type': 'general-purpose', 'agent_transcript_path': path}
 
@@ -127,6 +148,62 @@ class T(unittest.TestCase):
         d = inp(p, 'int1')
         d['agent_type'] = ''
         self.assertFalse(hook.handle(d, self.hist))
+
+    def test_new_signals(self):
+        wf = os.path.join(self.sess, 'workflows', 'wf_sig')
+        impl = make_signal_agent(wf, 'i1', 'T1 구현', [
+            ('Read', {'file_path': '/x/a.ts'}, 'ok', False),
+            ('Bash', {'command': 'ls'}, 'ok', False),
+            ('Bash', {'command': 'mkdir -p /x/y'}, 'ok', False),          # 쓰기가 아님
+            ('Edit', {'file_path': '/x/a.ts'}, 'ok', False),              # 첫 쓰기 = 4번째 턴
+            ('Bash', {'command': 'npm test'}, 'Exit code 1\nfail', False),  # 실패 + 전체 테스트
+            ('Bash', {'command': 'npm test'}, 'ok', False),               # 같은 실패 명령 재실행 = 헛돈
+            ('Bash', {'command': 'npm test -- test/a.test.ts'}, 'ok', False),  # 범위 좁힘: 전체 아님
+            ('Read', {'file_path': '/nope'}, 'no such file', True),       # is_error
+        ])
+        rev = make_signal_agent(wf, 'r1', 'T1 검토', [
+            ('Bash', {'command': 'cat > /tmp/z <<EOF\nx\nEOF'}, 'ok', False),
+            ('StructuredOutput', {'verdict': 'needs_fixes', 'findings': [
+                {'severity': 'important'}, {'severity': 'minor'}, {'severity': 'minor'}]}, 'ok', False),
+        ], hour=2)
+        hook.handle(inp(impl, 'i1'), self.hist)
+        hook.handle(inp(rev, 'r1'), self.hist)
+        rows = {r['agent_id']: r for r in self.rows()}
+        self.assertEqual((rows['i1']['start_turns'], rows['i1']['failed'], rows['i1']['full_tests']), (3, 3, 2))
+        self.assertIsNone(rows['r1']['start_turns'])  # 검토 agent 는 뺀다
+        self.assertEqual(rows['r1']['find'], [0, 1, 2])
+        out = cost.chart(self.rows(), 'wf_sig')
+        self.assertIn('착수까지 턴', out)
+        self.assertIn('쓴 양 K', out)
+        self.assertIn('헛돈 시도', out)
+        self.assertIn('전체 테스트 실행 수', out)
+        self.assertIn('심각 0 · 중요 1 · 사소 2', out)
+
+    def test_old_rows_show_dash(self):
+        hook.handle(inp(make_agent(self.sess, 'old1', 'T 구현'), 'old1'), self.hist)
+        row = self.rows()[0]
+        for k in ('start_turns', 'failed', 'full_tests', 'find'):
+            row.pop(k, None)
+        out = cost.chart([row], row['run'])
+        self.assertIn('—', out)
+
+    def test_todo_rules(self):
+        wf = os.path.join(self.sess, 'workflows', 'wf_todo')
+        steps = [('Read', {'file_path': '/x/a'}, 'ok', False)] * 16 + [('Write', {'file_path': '/x/b'}, 'ok', False)]
+        hook.handle(inp(make_signal_agent(wf, 's1', 'T1 구현', steps), 's1'), self.hist)
+        self.assertIn('고칠 파일·줄 위치를 더 적기', cost.chart(self.rows(), 'wf_todo'))
+
+    def test_rebuild_run(self):
+        wf = os.path.join(self.sess, 'workflows', 'wf_rb')
+        hook.handle(inp(make_agent(wf, 'rb1', 'T 구현'), 'rb1'), self.hist)
+        f = os.path.join(self.hist, 'history-2026-10.jsonl')
+        row = json.loads(open(f).read())
+        row.pop('failed')
+        open(f, 'w').write(json.dumps(row) + '\n')
+        self.assertEqual(cost.delete_runs(self.hist, {'wf_rb'}), 1)
+        self.assertEqual(self.rows(), [])
+        hook.handle(inp(os.path.join(wf, 'agent-rb1.jsonl'), 'rb1'), self.hist)
+        self.assertIn('failed', self.rows()[0])
 
 
 if __name__ == '__main__':
