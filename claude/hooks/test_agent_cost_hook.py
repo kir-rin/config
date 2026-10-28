@@ -179,6 +179,39 @@ class T(unittest.TestCase):
         self.assertIn('전체 테스트 실행 수', out)
         self.assertIn('심각 0 · 중요 1 · 사소 2', out)
 
+    def _commit_agent(self, wf, aid, nfiles, extra=None, outs=10):
+        steps = [('Write', {'file_path': '/x/a'}, 'ok', False),
+                 ('Bash', {'command': 'git commit -m x'}, f'[main abc] x\n {nfiles} files changed, 9 insertions(+)', False)]
+        return make_signal_agent(wf, aid, 'T1 구현', steps + (extra or []))
+
+    def test_files_changed_from_commit_and_todo_priority(self):
+        wf = os.path.join(self.sess, 'workflows', 'wf_files')
+        hook.handle(inp(self._commit_agent(wf, 'f1', 26), 'f1'), self.hist)
+        self.assertEqual(self.rows()[0]['files'], 26)
+        out = cost.chart(self.rows(), 'wf_files')
+        self.assertIn('바뀐 파일 수', out)
+        self.assertIn('화면 부품 하나 = 과업 하나로 쪼개기', out)
+
+    def test_files_beat_big_output_rule(self):
+        # 쓴 양 K > 50 이어도 파일이 15 넘으면 쪼개기가 먼저
+        rows = [dict(run='wf_x', agent_id='a', label='T1 구현', role='구현', model='m', start='2026-10-28T01:00:00+00:00',
+                     end='2026-10-28T01:05:00+00:00', min=5, turns=3, ctx_first=1000, ctx_end=2000, out_tok=60000,
+                     dup_kb=0, reread=0, md_kb=0, blocked=0, over300=0, over300_kb=0, result_kb=1, explained_tok=0, top=[],
+                     start_turns=2, failed=0, full_tests=0, find=None, files=20)]
+        out = cost.chart(rows, 'wf_x')
+        self.assertIn('쪼개기', out)
+        self.assertNotIn('시그니처', out)
+        rows[0]['files'] = 5
+        out = cost.chart(rows, 'wf_x')
+        self.assertIn('시그니처', out)
+
+    def test_files_from_structured_output(self):
+        wf = os.path.join(self.sess, 'workflows', 'wf_so')
+        p = make_signal_agent(wf, 'so1', 'T1 구현', [('Write', {'file_path': '/x/a'}, 'ok', False),
+                              ('StructuredOutput', {'files_changed': 12}, 'ok', False)])
+        hook.handle(inp(p, 'so1'), self.hist)
+        self.assertEqual(self.rows()[0]['files'], 12)
+
     def test_old_rows_show_dash(self):
         hook.handle(inp(make_agent(self.sess, 'old1', 'T 구현'), 'old1'), self.hist)
         row = self.rows()[0]

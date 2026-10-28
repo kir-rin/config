@@ -226,6 +226,7 @@ def analyze(path, label, max_bytes=None):
     uses = {}
     model = None
     start_turns = None  # 첫 파일 쓰기 앞의 assistant 턴 수
+    so_files = None     # StructuredOutput 의 files_changed (정수 또는 목록)
     findings = None     # 마지막 StructuredOutput 의 findings 심각도별 개수
     for r in recs:
         if r.get('type') == 'assistant':
@@ -240,6 +241,13 @@ def analyze(path, label, max_bytes=None):
                     if start_turns is None and is_file_write(c['name'], inp0):
                         start_turns = list(msgs).index(mid)
                     if c['name'] == 'StructuredOutput':
+                        fc = inp0.get('files_changed')
+                        if isinstance(fc, bool):
+                            fc = None
+                        if isinstance(fc, (int, float)):
+                            so_files = int(fc)
+                        elif isinstance(fc, list):
+                            so_files = len(fc)
                         fl = inp0.get('findings')
                         findings = {k: 0 for k in SEVERITIES}
                         for f in fl if isinstance(fl, list) else []:
@@ -256,6 +264,7 @@ def analyze(path, label, max_bytes=None):
     kinds = {k: [0, 0.0] for k in KINDS}
     calls = []
     failed = full_tests = 0
+    commit_files = 0  # git commit 출력의 「N files changed」 합
     failed_tests = set()
     for r in recs:
         if r.get('type') == 'user' and isinstance(r['message'].get('content'), list):
@@ -274,6 +283,9 @@ def analyze(path, label, max_bytes=None):
                     failed += 1
                     if k == 'test':
                         failed_tests.add(cmd_key)
+                if u['name'] == 'Bash' and 'git commit' in str(u['input'].get('command', '')):
+                    for mm in re.finditer(r'(\d+) files? changed', text):
+                        commit_files += int(mm.group(1))
                 if is_full_test(u['name'], u['input']):
                     full_tests += 1
                 kinds[k][0] += 1
@@ -319,7 +331,8 @@ def analyze(path, label, max_bytes=None):
     return dict(label=label, path=path, model=model or '?', span=span, start=min(stamps), end=max(stamps), turns=len(msgs), records=sum(1 for r in recs if r.get('type') == 'assistant'),
                 ctx=ctx, out_tok=out_tok, tool_sec=tool_sec, model_sec=max(0.0, span - tool_sec), kinds=kinds, calls=calls,
                 dup_bytes=dup_bytes, md_bytes=md_bytes, total_bytes=total_bytes,
-                start_turns=start_turns, failed=failed, full_tests=full_tests, findings=findings)
+                start_turns=start_turns, failed=failed, full_tests=full_tests, findings=findings,
+                files_changed=(so_files if so_files is not None else commit_files))
 
 
 def fmt_kb(n):
@@ -372,6 +385,7 @@ def summarize(r, agent_id):
         result_kb=round(r['total_bytes'] / 1024, 1), explained_tok=int(explained), top=top,
         start_turns=(r['start_turns'] if role_of(r['label']) in ('구현', '수정') else None),
         failed=r['failed'], full_tests=r['full_tests'],
+        files=(r['files_changed'] if role_of(r['label']) in ('구현', '수정') else None),
         find=([r['findings'].get(k, 0) for k in SEVERITIES] if r['findings'] is not None
               else ([0, 0, 0] if role_of(r['label']) in ('검토', '재검토') else None)))
 
@@ -494,6 +508,7 @@ def run_stats(rs):
         ('수정 라운드 수', sum(1 for r in rs if re.search(r'수정\s*\d+', r['label'] or ''))),
         ('착수까지 턴', _avg([r['start_turns'] for r in rs if r.get('start_turns') is not None]) if any('start_turns' in r for r in rs) else None),
         ('쓴 양 K', (max([r['out_tok'] for r in rs if r['role'] in ('구현', '수정')] or [0]) / 1000) if rs else None),
+        ('바뀐 파일 수', (max([r.get('files') or 0 for r in rs if r['role'] in ('구현', '수정')] or [0]) if any(r.get('files') is not None for r in rs) else None)),
         ('헛돈 시도', sum(r['failed'] for r in rs) if all('failed' in r for r in rs) else None),
         ('전체 테스트 실행 수', sum(r['full_tests'] for r in rs) if all('full_tests' in r for r in rs) else None),
         ('검토 지적(심각·중요·사소)', _finds(rs)),
@@ -613,9 +628,12 @@ def chart(rows, run=None):
     # 5. 다음에 할 일
     fix = [r['ctx_end'] for r in rs if r['role'] == '수정']
     impl = st['구현 마칠 때 대화 길이 K']
-    if (st['착수까지 턴'] or 0) > 15:
+    if (st['바뀐 파일 수'] or 0) > 15:
+        # 파일이 많으면 글자 수 줄이기(시그니처)보다 과업 쪼개기가 먼저다
+        todo = f"바뀐 파일 수 {st['바뀐 파일 수']:.0f} 인 구현이 있다 → 과업이 넓다 → 화면 부품 하나 = 과업 하나로 쪼개기"
+    elif (st['착수까지 턴'] or 0) > 15:
         todo = f"착수까지 턴 {st['착수까지 턴']:.0f} → 과업 파일에 고칠 파일·줄 위치를 더 적기"
-    elif (st['쓴 양 K'] or 0) > 50:
+    elif (st['쓴 양 K'] or 0) > 50:  # 바뀐 파일 수가 작을 때만 여기까지 온다
         todo = f"쓴 양 {st['쓴 양 K']:.0f}K 인 구현이 있다 → 계획에 시그니처를 박기(규칙 13)"
     elif (st['헛돈 시도'] or 0) > 5:
         todo = f"헛돈 시도 {st['헛돈 시도']} → 막힌 원인 확인"

@@ -125,6 +125,7 @@ def main():
     ap.add_argument('task')
     ap.add_argument('--decisions')
     ap.add_argument('--out')
+    ap.add_argument('--strict', action='store_true', help='과업이 넓으면(고칠 파일 10개 초과 · 층 5개 초과 · 시험 경로 없음) 경고 대신 exit 4')
     ap.add_argument('--repo', help='레포 루트. 주면 `## 고칠 파일` 경로가 있는지 확인한다(없으면 경고만)')
     a = ap.parse_args()
     if os.path.isdir(a.plan):
@@ -329,7 +330,35 @@ def numbered(lines, start=0):
     return '\n'.join(lines[start:]).rstrip()
 
 
-def check_fix_files(tl, meta, tpath, repo):
+MAX_FILES, MAX_LAYERS = 10, 5
+LAYERS = ('src/ai', 'src/tools', 'src/workflow', 'src/events', 'src/store', 'host/web', 'src/ui')
+
+
+def layer_of(path):
+    for l in LAYERS:
+        if path == l or path.startswith(l + '/'):
+            return l
+    return 'host/' if path.startswith('host/') else None
+
+
+def check_task_size(name, paths, strict):
+    """고칠 파일 수·층 수가 넘으면 stderr 경고(strict 면 exit 4)."""
+    uniq = list(dict.fromkeys(paths))
+    layers = {l for l in map(layer_of, uniq) if l}
+    msgs = []
+    if len(uniq) > MAX_FILES:
+        msgs.append(f'{name}: 과업이 넓다({len(uniq)}파일, 시험 포함 {MAX_FILES} 초과) — 쪼개라: 화면 부품 하나(표 / 띠 행동 / 탭) = 과업 하나')
+    if len(layers) > MAX_LAYERS:
+        msgs.append(f'{name}: 과업이 넓다({len(layers)}층: {", ".join(sorted(layers))}, {MAX_LAYERS} 초과) — 쪼개라: 화면 부품 하나(표 / 띠 행동 / 탭) = 과업 하나')
+    if not any(t.startswith('test/') or '/test/' in t for t in uniq):
+        msgs.append(f'{name}: `## 고칠 파일` 에 test/ 경로가 없다 — 시험 파일도 적는다')
+    for m in msgs:
+        print(('오류: ' if strict else '경고: ') + m, file=sys.stderr)
+    if msgs and strict:
+        sys.exit(4)
+
+
+def check_fix_files(tl, meta, tpath, repo, strict=False):
     """`## 고칠 파일` 절에 백틱 경로가 하나도 없으면 exit 3. kind: research|review 는 건너뛴다."""
     if meta.get('kind') in ('research', 'review'):
         return
@@ -357,6 +386,7 @@ def check_fix_files(tl, meta, tpath, repo):
     if not paths:
         print(f'오류: {name} 의 `## 고칠 파일` 절에 백틱 경로(`path`)가 하나도 없다.', file=sys.stderr)
         sys.exit(3)
+    check_task_size(name, [t for t, _ in paths], strict)
     if repo:
         for t, ln in paths:
             if not os.path.exists(os.path.join(os.path.expanduser(repo), t)):
@@ -384,7 +414,7 @@ def folder_main(a):
     if isinstance(tags, str):
         tags = [tags]
     tagset = set(tags)
-    check_fix_files(tl, meta, tpath, a.repo)
+    check_fix_files(tl, meta, tpath, a.repo, a.strict)
     want = []
     for k in ('uses', 'produces'):
         v = meta.get(k) or []

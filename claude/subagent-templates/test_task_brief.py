@@ -76,6 +76,40 @@ class FixFiles(unittest.TestCase):
         r = run(self.mk('## 고칠 파일\n- `src/a.ts:10`\n'), '1')
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_wide_files_warns_then_strict_exit4(self):
+        files = ''.join(f'- `src/ui/f{i}.ts`\n' for i in range(10)) + '- `test/a.test.ts`\n'
+        plan = self.mk('## 고칠 파일\n' + files)
+        r = run(plan, '1')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('과업이 넓다(11파일', r.stderr)
+        self.assertIn('= 과업 하나', r.stderr)
+        self.assertEqual(run(plan, '1', '--strict').returncode, 4)
+
+    def test_eight_files_ok(self):
+        files = ''.join(f'- `src/ui/f{i}.ts`\n' for i in range(9)) + '- `test/a.test.ts`\n'
+        r = run(self.mk('## 고칠 파일\n' + files), '1', '--strict')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn('넓다', r.stderr)
+
+    def test_seven_layers_warns(self):
+        body = '## 고칠 파일\n- `src/ai/a.ts`\n- `src/tools/b.ts`\n- `src/workflow/c.ts`\n- `host/web/d.ts`\n- `host/server.ts`\n- `src/ui/e.ts`\n- `src/events/f.ts`\n- `test/t.test.ts`\n'
+        plan = self.mk(body)
+        r = run(plan, '1')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('7층', r.stderr)
+        self.assertNotIn('파일)', r.stderr)
+        self.assertEqual(run(plan, '1', '--strict').returncode, 4)
+
+    def test_five_layers_ok(self):
+        body = '## 고칠 파일\n- `src/ai/a.ts`\n- `src/tools/b.ts`\n- `host/server.ts`\n- `src/ui/e.ts`\n- `src/events/f.ts`\n- `test/t.test.ts`\n'
+        r = run(self.mk(body), '1', '--strict')
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_no_test_path_warns(self):
+        r = run(self.mk('## 고칠 파일\n- `src/a.ts`\n'), '1')
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn('시험 파일도 적는다', r.stderr)
+
     def test_research_skips(self):
         r = run(self.mk('조사만', front='kind: research'), '1')
         self.assertEqual(r.returncode, 0, r.stderr)
