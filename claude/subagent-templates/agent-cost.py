@@ -13,6 +13,8 @@ agent 마다: 모델 · 걸린 분 · 턴 · 맥락 크기(입력+캐시읽기+�
 도구 시간과 모델 시간 · 종류별(read/write/test/git/other) 호출 수와 시간 · 가장 큰 도구 결과 N개.
 턴 = 서로 다른 응답(message id) 수. transcript 는 응답 하나를 블록마다 줄로 쪼개 적으므로 기록 줄 수는 더 크다.
 """
+import re as _re_split
+SPLIT_RE = _re_split.compile(r'(^R\d+\b|나누기|합치기|split|refactor|merge)', _re_split.I)
 import argparse, collections, datetime as dt, glob, json, os, re, shlex, sys
 
 KINDS = ['read', 'write', 'test', 'git', 'other']
@@ -508,7 +510,8 @@ def run_stats(rs):
         ('수정 라운드 수', sum(1 for r in rs if re.search(r'수정\s*\d+', r['label'] or ''))),
         ('착수까지 턴', _avg([r['start_turns'] for r in rs if r.get('start_turns') is not None]) if any('start_turns' in r for r in rs) else None),
         ('쓴 양 K', (max([r['out_tok'] for r in rs if r['role'] in ('구현', '수정')] or [0]) / 1000) if rs else None),
-        ('바뀐 파일 수', (max([r.get('files') or 0 for r in rs if r['role'] in ('구현', '수정')] or [0]) if any(r.get('files') is not None for r in rs) else None)),
+        # 나누기·합치기(리팩토링·merge)는 파일이 많은 게 정상이라 「과업이 넓다」 신호에서 뺀다
+        ('바뀐 파일 수', (max([r.get('files') or 0 for r in rs if r['role'] in ('구현', '수정') and not SPLIT_RE.search(r.get('label') or '')] or [0]) if any(r.get('files') is not None for r in rs) else None)),
         ('헛돈 시도', sum(r['failed'] for r in rs) if all('failed' in r for r in rs) else None),
         ('전체 테스트 실행 수', sum(r['full_tests'] for r in rs) if all('full_tests' in r for r in rs) else None),
         ('검토 지적(심각·중요·사소)', _finds(rs)),
