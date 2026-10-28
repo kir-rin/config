@@ -11,7 +11,7 @@
 - **답은 짧게.** 결론 먼저, 산문 6줄·불릿 5개 이내, 코드 고친 뒤 설명 3줄 이내, 서론·요청 재진술·마지막 요약 문단 없음.
   비교는 표로, 파일은 `path:line`. 사용자가 「자세히」라고 할 때만 넘긴다. 상세 → `~/config/claude/global/answer-format.md`.
 - **subagent 는 `worker` 타입으로 띄운다**(MCP·스킬 없이 파일·셸·웹 도구만 — 시작 맥락 약 48K → 14K).
-  Workflow 스크립트에서는 `agent(..., { agentType: 'worker' })`. MCP·스킬·Artifact 가 꼭 필요한 일만 다른 타입으로.
+  Workflow 스크립트에서는 `agent(..., { agentType: 'worker' })`. 캔버스·아티팩트 일은 `artifact-worker`(Artifact 만 더함). MCP·스킬이 꼭 필요한 일만 다른 타입으로.
 - 워크플로우·subagent 결과를 받으면 `agent-cost.py --chart --run <id>` 그림을 짧게 함께 보여 준다(`agent-cost` 스킬).
 
 ## 이럴 때 이 파일을 먼저 읽는다
