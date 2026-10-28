@@ -61,4 +61,6 @@
     - 라이브러리·외부 연결 어댑터(판단)와 모양 맞추기는 다른 과업으로 나눈다. 시제품이 있으면 그 코드 위치를 brief 에 적어 라이브러리 내부를 뒤지지 않게 한다.
     - 코드에서 이름의 정의·부르는 곳·모양은 LSP(goToDefinition·findReferences·hover)로 먼저 찾고, 그다음 필요한 줄만 sed -n 으로 읽는다(2026-10-28). TS 레포는 `ts-lsp@kir-local` 플러그인이 켜져 있어야 한다(`~/config/claude/plugins/ts-lsp/README.md`).
 
+14. **외부 라이브러리 쓰는 법은 docs 레포 `libs/<라이브러리>.md` 노트를 먼저 보고, 없으면 `docs-worker` 가 context7·llms.txt·시제품으로 노트를 먼저 만든다. 빌드된 node_modules JS 를 뒤지지 않는다**(2026-10-28 — 대화 칸 과업이 50번 넘게 열었다).
+
 전역 지침 목차(`~/.claude/CLAUDE.md`, 사본 `~/config/claude/global/CLAUDE.md`)에서 상황별로 가리킨다 — 자동으로 불러오지 않는다.
