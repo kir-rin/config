@@ -114,7 +114,7 @@ class T(unittest.TestCase):
             d = os.path.join(self.sess, 'workflows', w)
             hook.handle(inp(make_agent(d, w + 'x', 'T 구현', hour=1 if w == 'wf_a' else 5, ctx=ctx), w + 'x'), self.hist)
         out = cost.chart(self.rows(), 'wf_b')
-        self.assertIn('▼ 끝 맥락 −50% (지난 wf_a)', out)
+        self.assertIn('▼ 마칠 때 대화 길이 −50% (지난 wf_a)', out)
 
     def test_cli_never_blocks(self):
         for stdin in ('not json', json.dumps({'agent_id': 'x', 'agent_transcript_path': '/nope'}), ''):

@@ -388,10 +388,10 @@ def run_stats(rs):
     n = len(rs) or 1
     impl = [r['ctx_end'] for r in rs if r['role'] == '구현']
     return collections.OrderedDict([
-        ('시작 고정분 K', sum(r['ctx_first'] for r in rs) / n / 1000),
-        ('끝 맥락 평균 K', sum(r['ctx_end'] for r in rs) / n / 1000),
-        ('구현 끝 맥락 평균 K', (sum(impl) / len(impl) / 1000) if impl else None),
-        ('중복 읽기 KB', sum(r['dup_kb'] for r in rs)),
+        ('시작할 때 대화 길이 K', sum(r['ctx_first'] for r in rs) / n / 1000),
+        ('마칠 때 대화 길이 평균 K', sum(r['ctx_end'] for r in rs) / n / 1000),
+        ('구현 마칠 때 대화 길이 K', (sum(impl) / len(impl) / 1000) if impl else None),
+        ('같은 내용 다시 읽은 양 KB', sum(r['dup_kb'] for r in rs)),
         ('빠진 출력 재읽기 건', sum(r['reread'] for r in rs)),
         ('문서(.md) 읽기 KB', sum(r['md_kb'] for r in rs)),
         ('hook 이 막은 읽기 건', sum(r['blocked'] for r in rs)),
@@ -435,7 +435,7 @@ def biggest_waste(rs):
     st = run_stats(rs)
     big = sorted((x for r in rs for x in r['top']), key=lambda x: -x['kb'])
     cands = [
-        (sum(r['dup_kb'] for r in rs), f"중복 읽기 {sum(r['dup_kb'] for r in rs):.0f}KB"),
+        (sum(r['dup_kb'] for r in rs), f"같은 내용 다시 읽기 {sum(r['dup_kb'] for r in rs):.0f}KB"),
         (sum(r['over300_kb'] for r in rs), f"300줄 넘는 읽기 {st['300줄 넘는 읽기 건']}건"),
         (sum(x['kb'] for x in big if x['saved']), f"파일로 빠진 큰 출력 {sum(1 for x in big if x['saved'])}건"),
     ]
@@ -460,9 +460,9 @@ def chart(rows, run=None):
     L = []
     # 1. 판정
     if pst:
-        cur, p = st['끝 맥락 평균 K'], pst['끝 맥락 평균 K']
+        cur, p = st['마칠 때 대화 길이 평균 K'], pst['마칠 때 대화 길이 평균 K']
         d = 100 * (cur - p) / p if p else 0
-        verdict = f"{'=' if abs(d) < 5 else ('▼' if d < 0 else '▲')} 끝 맥락 {'−' if d < 0 else '+'}{abs(d):.0f}% (지난 {before[-1]})"
+        verdict = f"{'=' if abs(d) < 5 else ('▼' if d < 0 else '▲')} 마칠 때 대화 길이 {'−' if d < 0 else '+'}{abs(d):.0f}% (지난 {before[-1]})"
     else:
         verdict = '● 비교할 지난 실행 없음'
     L.append(f"{verdict} · 가장 큰 낭비: {biggest_waste(rs)}")
@@ -475,7 +475,7 @@ def chart(rows, run=None):
     for role in set(r['role'] for r in rs):
         g = [r for r in rs if r['role'] == role]
         med[role] = (median([r['min'] for r in g]), median([r['ctx_end'] for r in g]), len(g))
-    L.append(pad('agent', 16) + ' ' + pad('░ 시작 고정분  █ 작업 중 쌓임', W) + '  끝K   분  모델')
+    L.append(pad('agent', 16) + ' ' + pad('░ 시작할 때  █ 일하며 쌓인 것', W) + '  마칠때K 분  모델')
     for r in rs:
         a = round(W * r['ctx_first'] / top_ctx)
         b = max(0, round(W * r['ctx_end'] / top_ctx) - a)
@@ -486,10 +486,10 @@ def chart(rows, run=None):
         L.append(f"{pad(r['label'] or r['agent_id'], 16)} {pad('░' * a + '█' * b, W)} {r['ctx_end'] / 1000:4.0f} {r['min']:5.1f}  {r['model']}{flag}")
     L.append('')
     # 3. 신호 표
-    L.append(pad('신호', 22) + '   이번    지난  추세')
+    L.append(pad('신호', 28) + '   이번    지난  추세')
     for k, v in st.items():
         pv = pst[k] if pst else None
-        L.append(f"{pad(k, 22)} {fmt_v(v):>6}  {fmt_v(pv):>6}   {trend(v, pv)}")
+        L.append(f"{pad(k, 28)} {fmt_v(v):>6}  {fmt_v(pv):>6}   {trend(v, pv)}")
     growth = sum(max(0, r['ctx_end'] - r['ctx_first']) for r in rs)
     expl = sum(r['explained_tok'] for r in rs)
     if growth and (growth - expl) / growth > 0.3:
@@ -505,13 +505,13 @@ def chart(rows, run=None):
     L.append('')
     # 5. 다음에 할 일
     fix = [r['ctx_end'] for r in rs if r['role'] == '수정']
-    impl = st['구현 끝 맥락 평균 K']
+    impl = st['구현 마칠 때 대화 길이 K']
     if fix and impl and sum(fix) / len(fix) / 1000 >= 0.8 * impl:
-        todo = '수정 agent 끝 맥락이 구현급이다 → 과업을 더 잘게'
-    elif st['중복 읽기 KB'] > 50:
-        todo = '중복 읽기가 크다 → brief·지도 확인'
-    elif st['시작 고정분 K'] > 30:
-        todo = f"시작 고정분 {st['시작 고정분 K']:.0f}K → worker 타입 확인"
+        todo = '수정 agent 의 마칠 때 대화 길이가 구현급이다 → 과업을 더 잘게'
+    elif st['같은 내용 다시 읽은 양 KB'] > 50:
+        todo = '같은 내용을 많이 다시 읽었다 → brief·지도 확인'
+    elif st['시작할 때 대화 길이 K'] > 30:
+        todo = f"시작할 때 대화 길이 {st['시작할 때 대화 길이 K']:.0f}K → worker 타입 확인"
     else:
         todo = '두드러진 신호 없음'
     L.append(f'다음: {todo}')
