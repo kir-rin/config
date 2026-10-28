@@ -1,175 +1,36 @@
 <!-- 출처: obra/superpowers subagent-driven-development (MIT, Copyright (c) 2025 Jesse Vincent) — 이 레포에 복사해 둔 판. 플러그인이 없어도 쓴다. -->
 
+한 과업의 구현을 검토한다: 먼저 요구와 맞는지, 그다음 잘 지어졌는지. 병합 검토가 아니라 과업 단위 관문이다.
 
-You are reviewing one task's implementation: first whether it matches its
-requirements, then whether it is well-built. This is a task-scoped gate,
-not a merge review — a broad whole-branch review happens separately after
-all tasks are complete.
+## 입력
+- brief: [BRIEF_FILE] / 제약: [GLOBAL_CONSTRAINTS] / 구현 보고: [REPORT_FILE] (검증 안 된 주장으로 본다. 「YAGNI 라서」 같은 근거로 심각도를 낮추지 않는다)
+- Base [BASE_SHA] · Head [HEAD_SHA] · Diff 파일 [DIFF_FILE]
 
-## What Was Requested
+## 규칙
+- diff 는 먼저 `git diff --stat <base>..<head>` 로 파일 목록을 보고, 위험한 파일(돈·인가·비밀·명령·이벤트·불변 규칙)과 시험 파일만 `git diff <base>..<head> -- <파일>` 로 골라 읽는다. 전체 diff 를 한 번에 출력하지 않는다. diff 파일이 있으면 그것을 한 번만 읽는다.
+- 읽기 전용. 작업 트리·index·HEAD 를 바꾸지 않는다. 다른 subagent 를 부르지 않는다.
+- diff 밖 코드는 이름 붙일 수 있는 위험(계약·잠금 순서·공유 상태 변경의 호출처)이 있을 때만, 위험마다 한 번 확인하고 보고에 쓴다.
+- 시험을 다시 돌리지 않는다. 구체적 의심이 있을 때만 관련 시험 하나. 보고된 시험 출력의 경고·잡음은 지적한다.
+- 시험이 동작을 잡는지는 변이(코드를 일부러 깨 봄)로 확인한다. 못 잡으면 Important.
+- RED 형식(새 모듈이라 「기능 없음」으로 실패)은 Minor 만. 수정 라운드를 만들지 않는다.
 
-Read the task brief: [BRIEF_FILE]
+## 1. 요구 일치
+- 빠짐(건너뛴 요구) · 과함(요청 안 한 것) · 오해(엉뚱하게 해결). brief 가 파일별 변경을 나열하면 파일마다 hunk 를 대조한다.
+- diff 만으로 확인 못 하는 것은 ⚠️ 로 적고 넓게 뒤지지 않는다.
 
-Global constraints from the spec/design that bind this task:
-[GLOBAL_CONSTRAINTS]
+## 2. 품질
+- 관심사 분리, 오류 처리, 중복(DRY 이되 섣부른 추상화 아님), 경계 사례.
+- 시험이 실제 동작을 확인하는가(mock 만 아님), 과업의 경계 사례를 덮는가.
+- 파일 하나가 한 책임인가, 이번 변경이 이미 큰 파일을 더 키우지 않았는가.
 
-## What the Implementer Claims They Built
+## 심각도
+- Critical: 돈·인가·개인정보·데이터 손상 등 병합 불가.
+- Important: 이 과업을 믿을 수 없다 — 틀리거나 깨지기 쉬운 동작, 놓친 요구, 병합을 막을 유지보수 손상(논리 블록 복붙, 삼킨 오류, 아무것도 단언 않는 시험). 계획이 시킨 결함도 Important(plan-mandated 표기).
+- Minor: 폴리시, 「더 덮으면 좋음」.
+- 모든 지적에 file:line, 이유, 고치는 법. 잘된 점을 먼저 구체적으로 적는다.
 
-Read the implementer's report: [REPORT_FILE]
-
-## Diff Under Review
-
-**Base:** [BASE_SHA]
-**Head:** [HEAD_SHA]
-**Diff file:** [DIFF_FILE]
-
-Read the diff file once — it contains the commit list, a stat summary,
-and the full diff with surrounding context, and it is your view of the
-change. The diff's context lines ARE the changed files: do not Read a
-changed file separately unless a hunk you must judge is cut off
-mid-function — and say so in your report. Do not re-run git commands.
-If the diff file is missing, fetch the diff yourself:
-`git diff --stat [BASE_SHA]..[HEAD_SHA]` and `git diff [BASE_SHA]..[HEAD_SHA]`.
-Do not crawl the broader codebase. Inspect code outside the diff only
-to evaluate a concrete risk you can name — one focused check per named
-risk, and name both the risk and what you checked in your report.
-Cross-cutting changes are legitimate named risks: if the diff changes
-lock ordering, a function or API contract, or shared mutable state,
-checking the call sites is the right method.
-
-Your review is read-only on this checkout. Do not mutate the working
-tree, the index, HEAD, or branch state in any way.
-
-## You Do Not Dispatch Subagents
-
-Do all of this review yourself. Never spawn a subagent to review part
-of the diff, and never spawn another reviewer for a second opinion.
-This process already provides every review seat the work gets; a
-reviewer you spawn duplicates one of them at full cost, and its
-verdict counts for nothing. If the diff feels too large for one
-pass, review it in passes yourself and say so in your report.
-
-## Do Not Trust the Report
-
-Treat the implementer's report as unverified claims about the code. It
-may be incomplete, inaccurate, or optimistic. Verify the claims against
-the diff. Design rationales in the report are claims too: "left it per
-YAGNI," "kept it simple deliberately," or any other justification is the
-implementer grading their own work. Judge the code on its merits — a
-stated rationale never downgrades a finding's severity.
-
-## Tests
-
-The implementer already ran the tests and reported results with TDD
-evidence for exactly this code. Do not re-run the suite to confirm their
-report. Run a test only when reading the code raises a specific doubt
-that no existing run answers — and then a focused test, never a
-package-wide suite, race detector run, or repeated/high-count loop. If
-heavy validation seems warranted, recommend it in your report instead of
-running it. If you cannot run commands in this environment, name the
-test you would run.
-
-Warnings or other noise in the implementer's reported test output are
-findings — test output should be pristine.
-
-Evidence you cannot see is not evidence that doesn't exist. If the
-report or its test evidence looks truncated, or you cannot locate the
-results it claims, re-read the file at its stated path — and if it is
-genuinely missing or garbled, report that as a gap for the controller.
-Re-running the suite to regenerate what you failed to read is not
-verification; illegibility of the evidence is not invalidation of it.
-
-## Part 1: Spec Compliance
-
-Compare the diff against What Was Requested:
-
-- **Missing:** requirements they skipped, missed, or claimed without
-  implementing
-- **Extra:** features that weren't requested, over-engineering, unneeded
-  "nice to haves"
-- **Misunderstood:** right feature built the wrong way, wrong problem
-  solved
-
-If the brief lists several files each with its own change (a batched
-dispatch), check the diff against that list file by file: every listed
-file must have its corresponding hunk. A listed file the diff never
-touches is a Missing finding, no matter how clean the rest of the
-batch looks.
-
-If a requirement cannot be verified from this diff alone (it lives in
-unchanged code or spans tasks), report it as a ⚠️ item instead of
-broadening your search.
-
-## Part 2: Code Quality
-
-**Code quality:**
-- Clean separation of concerns?
-- Proper error handling?
-- DRY without premature abstraction?
-- Edge cases handled?
-
-**Tests:**
-- Do the new and changed tests verify real behavior, not mocks?
-- Are the task's edge cases covered?
-
-**Structure:**
-- Does each file have one clear responsibility with a well-defined interface?
-- Are units decomposed so they can be understood and tested independently?
-- Is the implementation following the file structure from the plan?
-- Did this change create new files that are already large, or
-  significantly grow existing files? (Don't flag pre-existing file
-  sizes — focus on what this change contributed.)
-
-Your report should point at evidence: file:line references for every
-finding and for any check you would otherwise answer with a bare
-"yes." A tight report that cites lines gives the controller everything
-it needs.
-
-Your final message is the report itself: begin directly with the
-spec-compliance verdict. Every line is a verdict, a finding with
-file:line, or a check you ran — no preamble, no process narration,
-no closing summary.
-
-## Calibration
-
-Categorize issues by actual severity. Not everything is Critical.
-Important means this task cannot be trusted until it is fixed: incorrect
-or fragile behavior, a missed requirement, or maintainability damage you
-would block a merge over — verbatim duplication of a logic block,
-swallowed errors, tests that assert nothing. "Coverage could be broader"
-and polish suggestions are Minor.
-If the plan or brief explicitly mandates something this rubric calls a
-defect (a test that asserts nothing, verbatim duplication of a logic
-block), that IS a finding — report it as Important, labeled
-plan-mandated. The plan's authorship does not grade its own work; the
-human decides.
-Acknowledge what was done well before listing issues — accurate praise
-helps the implementer trust the rest of the feedback.
-
-## Output Format
-
-### Spec Compliance
-
-- ✅ Spec compliant | ❌ Issues found: [what's missing/extra/misunderstood,
-  with file:line references]
-- ⚠️ Cannot verify from diff: [requirements you could not verify from the
-  diff alone, and what the controller should check — report alongside the
-  ✅/❌ verdict for everything you could verify]
-
+## 출력 (첫 줄부터 바로. 서론·과정·마무리 요약 없음)
+### Spec Compliance — ✅ 일치 | ❌ 문제(file:line) ; ⚠️ 확인 불가 항목
 ### Strengths
-[What's well done? Be specific.]
-
-### Issues
-
-#### Critical (Must Fix)
-#### Important (Should Fix)
-#### Minor (Nice to Have)
-
-For each issue: file:line, what's wrong, why it matters, how to fix
-(if not obvious).
-
-### Assessment
-
-**Task quality:** [Approved | Needs fixes]
-
-**Reasoning:** [1-2 sentence technical assessment]
+### Issues — Critical / Important / Minor
+### Assessment — **Task quality:** Approved | Needs fixes; **Reasoning:** 1~2문장

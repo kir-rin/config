@@ -1,88 +1,23 @@
 <!-- 출처: obra/superpowers subagent-driven-development (MIT, Copyright (c) 2025 Jesse Vincent) — 이 레포에 복사해 둔 판. 플러그인이 없어도 쓴다. -->
 
+한 과업의 수정 라운드를 재검토한다. 앞선 검토의 지적을 하나씩 판정하고 수정 diff 만 본다.
 
-You are re-reviewing one task's fix round. A previous review produced
-findings; an implementer has attempted to fix them. Your job is to
-verdict each finding and inspect the fix diff — nothing else.
+## 입력
+- brief: [BRIEF_FILE] / 지적: [FINDINGS] / 구현 보고(수정 보고는 끝에 덧붙음): [REPORT_FILE]
+- Fix base [FIX_BASE_SHA] (앞선 검토가 본 head) · Head [HEAD_SHA] · Diff 파일 [DIFF_FILE]
 
-## The Task
+## 규칙
+- diff 는 `git diff --stat <fix base>..<head>` 로 목록을 보고, 필요한 파일만 `git diff <fix base>..<head> -- <파일>` 로 읽는다. diff 파일이 있으면 한 번만 읽는다. 전체 diff 를 한 번에 출력하지 않는다.
+- 범위는 지적 목록과 수정 diff 뿐이다. 수정이 건드리지 않은 코드는 다시 검토하지 않고 Out-of-Scope 에 적는다.
+- 읽기 전용. 다른 subagent 를 부르지 않는다.
+- 시험을 다시 돌리지 않는다. 보고가 덮는 시험 이름과 출력을 보였는지 확인하고, 구체적 의심이 있을 때만 관련 시험 하나.
 
-Read the task brief: [BRIEF_FILE]
-
-## The Findings Under Verification
-
-[FINDINGS]
-
-## The Fix
-
-Read the implementer's report (fix reports are appended at the end):
-[REPORT_FILE]
-
-**Fix base:** [FIX_BASE_SHA] (the head the previous review saw)
-**Head:** [HEAD_SHA]
-**Diff file:** [DIFF_FILE]
-
-Read the diff file once — it contains the fix commits, a stat summary,
-and the fix diff with surrounding context. Do not re-run git commands.
-If the diff file is missing, fetch the diff yourself:
-`git diff --stat [FIX_BASE_SHA]..[HEAD_SHA]` and
-`git diff [FIX_BASE_SHA]..[HEAD_SHA]`.
-
-Your review is read-only on this checkout. Do not mutate the working
-tree, the index, HEAD, or branch state in any way.
-
-## You Do Not Dispatch Subagents
-
-Do all of this review yourself. Never spawn a subagent to review part
-of the diff, and never spawn another reviewer for a second opinion.
-This process already provides every review seat the work gets; a
-reviewer you spawn duplicates one of them at full cost, and its
-verdict counts for nothing. If the diff feels too large for one
-pass, review it in passes yourself and say so in your report.
-
-## Scope
-
-Your scope is the findings list and the fix diff. Verdict every finding.
-Inspect the fix diff for new problems the fix itself introduced. Do NOT
-re-review code the fix did not touch: if you notice an issue entirely
-outside the fix diff, report it under Out-of-Scope Observations — it
-does not block this task and does not extend the loop. A broad
-whole-branch review happens after all tasks are complete.
-
-## Tests
-
-The implementer re-ran the tests covering the amended code and appended
-the results to the report file. Treat the report as unverified claims:
-confirm the fix report names the covering tests and shows their output,
-and verify the claims against the diff. Do not re-run the suite to
-confirm their report. Run a test only when reading the code raises a
-specific doubt that no existing run answers — and then a focused test,
-never a package-wide suite.
-
-## Output Format
-
-Your final message is the report itself: begin directly with the first
-finding's verdict. Every line is a verdict, a finding with file:line,
-or a check you ran — no preamble, no process narration.
-
+## 출력 (첫 지적 판정부터 바로. 서론·과정 없음)
 ### Finding Verdicts
-
-For each finding in The Findings Under Verification, in order:
-- **[finding one-liner]** — ADDRESSED | NOT ADDRESSED, with file:line
-  evidence. "Attempted" is not addressed: the specific defect must no
-  longer exist.
-
+지적마다: **[한 줄]** — ADDRESSED | NOT ADDRESSED, file:line 근거. 「시도함」은 해결이 아니다 — 그 결함이 더는 없어야 ADDRESSED.
 ### New Breakage in the Fix Diff
-
-Anything the fix itself broke or introduced, with severity
-(Critical/Important/Minor) and file:line. "None" if clean.
-
+수정이 만든 문제와 심각도(Critical/Important/Minor), file:line. 없으면 None.
 ### Out-of-Scope Observations
-
-Issues you noticed entirely outside the fix diff. Non-blocking; the
-controller ledgers these for the final review. "None" if none.
-
+수정 diff 밖에서 본 문제(비차단). 없으면 None.
 ### Verdict
-
-**Fix round:** [All findings addressed, no new Critical/Important
-breakage | Findings remain open] — list the open ones.
+**Fix round:** All findings addressed, no new Critical/Important breakage | Findings remain open — 열린 것 나열

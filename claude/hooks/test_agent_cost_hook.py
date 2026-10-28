@@ -226,6 +226,43 @@ class T(unittest.TestCase):
         hook.handle(inp(make_signal_agent(wf, 's1', 'T1 구현', steps), 's1'), self.hist)
         self.assertIn('고칠 파일·줄 위치를 더 적기', cost.chart(self.rows(), 'wf_todo'))
 
+    def test_read_kind_classification(self):
+        k = cost.read_kind
+        self.assertEqual(k('git diff abc..def'), 'diff')
+        self.assertEqual(k('git show HEAD'), 'diff')
+        self.assertEqual(k('cat sdd/x/brief.md'), '시작 문서')
+        self.assertEqual(k('/r/docs/MAP.md'), '시작 문서')
+        self.assertEqual(k('sed -n 1,50p src/a.ts'), '소스 코드')
+        self.assertEqual(k('/r/src/a.tsx'), '소스 코드')
+        self.assertEqual(k('npm test -- a.test.ts'), '시험·빌드')
+        self.assertEqual(k('npx tsc --noEmit'), '시험·빌드')
+        self.assertEqual(k('ls -la'), '기타')
+
+    def test_chart_read_kinds_and_per_agent_top(self):
+        wf = os.path.join(self.sess, 'workflows', 'wf_rk')
+        steps = [('Bash', {'command': 'git diff a..b'}, 'x\n' * 3000, False),
+                 ('Read', {'file_path': '/r/sdd/brief.md'}, 'y\n' * 100, False),
+                 ('Bash', {'command': 'sed -n 1,9p src/a.ts'}, 'z\n' * 50, False)]
+        hook.handle(inp(make_signal_agent(wf, 'rk1', 'T1 검토', steps), 'rk1'), self.hist)
+        row = self.rows()[0]
+        self.assertEqual(row['read_kb_by_kind']['diff'][1], 1)
+        self.assertGreater(row['read_kb_by_kind']['diff'][0], 5)
+        self.assertEqual(row['read_kb_by_kind']['시작 문서'][1], 1)
+        out = cost.chart(self.rows(), 'wf_rk')
+        self.assertIn('큰 읽기 종류별 합계', out)
+        self.assertIn('█', out)
+        self.assertIn('agent 별 가장 큰 결과', out)
+        self.assertRegex(out, r'T1 검토\s+\d+\.\dKB diff\s+git diff a\.\.b')
+
+    def test_old_rows_without_read_kinds(self):
+        hook.handle(inp(make_agent(self.sess, 'ok1', 'T 구현'), 'ok1'), self.hist)
+        row = self.rows()[0]
+        row.pop('read_kb_by_kind')
+        for x in row['top']:
+            x.pop('kind', None)
+        out = cost.chart([row], row['run'])
+        self.assertIn('—', out)
+
     def test_rebuild_run(self):
         wf = os.path.join(self.sess, 'workflows', 'wf_rb')
         hook.handle(inp(make_agent(wf, 'rb1', 'T 구현'), 'rb1'), self.hist)

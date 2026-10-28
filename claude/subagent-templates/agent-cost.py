@@ -367,6 +367,23 @@ def role_of(label):
     return '기타'
 
 
+CD_RE = re.compile(r'^cd\s+\S+\s*(&&|;)\s*')
+READ_KINDS = ['diff', '시작 문서', '소스 코드', '시험·빌드', '기타']
+
+
+def read_kind(desc):
+    """도구 호출 명령(또는 파일 경로) → 큰 읽기 종류."""
+    if re.search(r'\bgit\s+(-C\s+\S+\s+)?(diff|show)\b', desc):
+        return 'diff'
+    if re.search(r'(^|[\s;&|])(npm|npx|pnpm|tsc)\s|^tsc\b', desc):
+        return '시험·빌드'
+    if re.search(r'sdd/|plans/|\.md\b', desc):
+        return '시작 문서'
+    if re.search(r'\.(tsx?|jsx?|mjs|cjs)\b', desc):
+        return '소스 코드'
+    return '기타'
+
+
 def summarize(r, agent_id):
     """analyze() 결과 → 이력 한 줄(agent 하나)."""
     c = r['ctx'] or [0]
@@ -377,14 +394,22 @@ def summarize(r, agent_id):
     explained = sum(x['shown'] + x['in_bytes'] for x in calls) / BYTES_PER_TOK + r['out_tok']
     top = []
     for x in sorted(calls, key=lambda x: -x['size'])[:3]:
-        top.append(dict(kb=round(x['size'] / 1024, 1), cmd=x['desc'][:60], saved=bool(x['saved']), dup=bool(x['dup'])))
+        top.append(dict(kb=round(x['size'] / 1024, 1), cmd=x['desc'][:60], saved=bool(x['saved']), dup=bool(x['dup']), kind=read_kind(x['desc'])))
+    by_kind = {k: [0.0, 0] for k in READ_KINDS}
+    for x in calls:
+        if x['blocked']:
+            continue
+        b = by_kind[read_kind(x['desc'])]
+        b[0] += x['size'] / 1024
+        b[1] += 1
     return dict(
         run=run_id(r['path'], agent_id), agent_id=agent_id, label=r['label'], role=role_of(r['label']),
         model=r['model'].replace('claude-', ''), start=r['start'].astimezone(UTC).isoformat(), end=r['end'].astimezone(UTC).isoformat(),
         min=round(r['span'] / 60, 2), turns=r['turns'], ctx_first=c[0], ctx_end=c[-1], out_tok=r['out_tok'],
         dup_kb=round(r['dup_bytes'] / 1024, 1), reread=len(reread), md_kb=round(r['md_bytes'] / 1024, 1),
         blocked=sum(1 for x in calls if x['blocked']), over300=len(big), over300_kb=round(sum(x['shown'] for x in big) / 1024, 1),
-        result_kb=round(r['total_bytes'] / 1024, 1), explained_tok=int(explained), top=top,
+        result_kb=round(r['total_bytes'] / 1024, 1),
+        read_kb_by_kind={k: [round(v[0], 1), v[1]] for k, v in by_kind.items()}, explained_tok=int(explained), top=top,
         start_turns=(r['start_turns'] if role_of(r['label']) in ('구현', '수정') else None),
         failed=r['failed'], full_tests=r['full_tests'],
         files=(r['files_changed'] if role_of(r['label']) in ('구현', '수정') else None),
@@ -620,13 +645,25 @@ def chart(rows, run=None):
     if growth and (growth - expl) / growth > 0.3:
         L.append(f"⚠ 맥락 증가의 {100 * (growth - expl) / growth:.0f}% 가 읽기·쓰기·테스트 결과·출력으로 설명 안 된다(기타)")
     L.append('')
-    # 4. 큰 결과 상위 3
-    L.append('가장 큰 도구 결과')
-    big = sorted(((x, r['label']) for r in rs for x in r['top']), key=lambda t: -t[0]['kb'])[:3]
-    for x, lab in big:
-        tag = ('[파일로 빠짐]' if x['saved'] else '') + ('[중복]' if x['dup'] else '')
-        L.append(f"  {x['kb']:6.1f}KB {lab or ''} {tag}".rstrip())
-        L.append(f"           {x['cmd'][:60]}")
+    # 4. 큰 읽기 종류별 합계 · agent 별 1위
+    L.append('큰 읽기 종류별 합계')
+    have = [r['read_kb_by_kind'] for r in rs if r.get('read_kb_by_kind')]
+    if not have:
+        L.append('  — (이 run 의 줄에는 종류별 칸이 없다)')
+    else:
+        tot = {k: [sum(h.get(k, [0, 0])[0] for h in have), sum(h.get(k, [0, 0])[1] for h in have)] for k in READ_KINDS}
+        mx = max(v[0] for v in tot.values()) or 1
+        for k in READ_KINDS:
+            kb, n = tot[k]
+            L.append(f"  {pad(k, 10)} {pad('█' * round(30 * kb / mx), 30)} {kb:7.1f}KB {n:4d}건")
+    L.append('')
+    L.append('agent 별 가장 큰 결과')
+    for r in rs:
+        if not r['top']:
+            continue
+        x = r['top'][0]
+        tag = ('[빠짐]' if x['saved'] else '') + ('[중복]' if x['dup'] else '')
+        L.append(f"  {pad(r['label'] or r['agent_id'], 14)} {x['kb']:6.1f}KB {pad(x.get('kind', '—'), 9)} {CD_RE.sub('', x['cmd'])[:50]} {tag}".rstrip())
     L.append('')
     # 5. 다음에 할 일
     fix = [r['ctx_end'] for r in rs if r['role'] == '수정']
