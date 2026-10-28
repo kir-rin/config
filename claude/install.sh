@@ -2,6 +2,7 @@
 # 다른 기기에 Claude Code 개인 설정을 깐다(2026-10-28).
 #  - 전역 지침 목차: config/claude/global/CLAUDE.md → ~/.claude/CLAUDE.md (기존 파일은 .bak 으로 남김)
 #  - subagent 타입: config/claude/agents/*.md → ~/.claude/agents/ 링크
+#  - 저장된 Workflow: config/claude/workflows/*.js → ~/.claude/workflows/ 링크(/plan-task)
 #  - agent-cost hook(SubagentStop) 은 전역 ~/.claude/settings.json 에 등록한다(이미 있으면 건너뜀)
 #  - dispatch-guard hook(PreToolUse, matcher Agent) 도 전역 ~/.claude/settings.json 에 등록한다(이미 있으면 건너뜀)
 #  - read-guard hook 은 프로젝트별(.claude/settings.local.json)로 등록한다 — 인자로 프로젝트 경로를 주면 등록
@@ -21,6 +22,7 @@ cp "$C/global/CLAUDE.md" ~/.claude/CLAUDE.md
 for a in "$C"/agents/*.md; do
   ln -sf "$a" ~/.claude/agents/"$(basename "$a")"
 done
+mkdir -p ~/.claude/workflows && for w in "$C"/workflows/*.js; do ln -sf "$w" ~/.claude/workflows/"$(basename "$w")"; done  # 저장된 Workflow(/plan-task 등)
 
 python3 - ~/.claude/settings.json "$C/hooks/agent-cost-hook.py" <<'PY'
 import json, os, sys

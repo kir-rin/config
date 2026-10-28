@@ -35,6 +35,7 @@
     한 과업 = 구현 → 검토(위 3번 모델) → 지적이 있으면 수정 → (작은 수정이 아니면) 재검토, 최대 3바퀴, 그래도 남으면 멈추고 보고.
     여러 과업은 Workflow 스크립트(사용자가 opt-in 했을 때) 또는 subagent 를 하나씩. 작업 폴더(장부·반복 지적·보고·검토 파일)는
     계획 문서 옆 `sdd/<계획 이름>/` — 코드 레포·공유 레포 안(예: `.superpowers/`)에 두지 않는다.
+    Workflow 는 손으로 새로 쓰지 말고 저장된 `/plan-task`(`~/config/claude/workflows/plan-task.js`)에 args(갈래·models·merge·checkpoint)만 넘긴다 — 형식은 같은 폴더 README.
     subagent 는 `worker` 타입(MCP·스킬 없음, `~/config/claude/agents/worker.md`)으로 띄운다 — Workflow 는 `agent(prompt, { agentType: 'worker' })`.
     (2026-10-28 측정: 일반 subagent 첫 턴 48,484 → worker 14,003 토큰. 이 세션 subagent 259개 중 MCP 도구 호출 0번, 스킬 4번.)
     비용은 자동으로 쌓인다: subagent·워크플로우 agent 가 하나 끝날 때마다 전역 SubagentStop hook(`hooks/agent-cost-hook.py`)이
