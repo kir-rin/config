@@ -7,7 +7,7 @@
 - Fix base [FIX_BASE_SHA] (앞선 검토가 본 head) · Head [HEAD_SHA] · Diff 파일 [DIFF_FILE]
 
 ## 규칙
-- diff 는 `git diff --stat <fix base>..<head>` 로 목록을 보고, 필요한 파일만 `git diff <fix base>..<head> -- <파일>` 로 읽는다. diff 파일이 있으면 한 번만 읽는다. 전체 diff 를 한 번에 출력하지 않는다.
+- diff: `git diff --stat <fix base>..<head>` 로 목록을 보고, 생성·잠금·남의 부품 파일만 빼고 나머지는 파일별로 나눠 읽는다. 전체 diff 를 한 번에 출력하지 않는다.
 - 범위는 지적 목록과 수정 diff 뿐이다. 수정이 건드리지 않은 코드는 다시 검토하지 않고 Out-of-Scope 에 적는다.
 - 읽기 전용. 다른 subagent 를 부르지 않는다.
 - 시험을 다시 돌리지 않는다. 보고가 덮는 시험 이름과 출력을 보였는지 확인하고, 구체적 의심이 있을 때만 관련 시험 하나.
