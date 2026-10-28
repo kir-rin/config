@@ -1,0 +1,8 @@
+{
+  "name": "ts-lsp",
+  "version": "0.1.0",
+  "description": "TypeScript 7 native language server for the LSP tool (goToDefinition, findReferences, hover, call hierarchy)",
+  "author": { "name": "kir-rin" },
+  "license": "MIT",
+  "defaultEnabled": false
+}

@@ -5,6 +5,8 @@
 #  - agent-cost hook(SubagentStop) 은 전역 ~/.claude/settings.json 에 등록한다(이미 있으면 건너뜀)
 #  - dispatch-guard hook(PreToolUse, matcher Agent) 도 전역 ~/.claude/settings.json 에 등록한다(이미 있으면 건너뜀)
 #  - read-guard hook 은 프로젝트별(.claude/settings.local.json)로 등록한다 — 인자로 프로젝트 경로를 주면 등록
+#  - ts-lsp 플러그인(LSP 도구용 TS7 언어 서버): 로컬 마켓플레이스 kir-local 을 등록만 한다. 켜기는 프로젝트마다
+#    `claude plugin install ts-lsp@kir-local --scope local` 후 settings.local.json 에 "ts-lsp@kir-local": true (README 참고)
 # 사용: bash ~/config/claude/install.sh [hook 을 걸 프로젝트 경로 ...]
 set -euo pipefail
 C="$(cd "$(dirname "$0")" && pwd)"
@@ -69,4 +71,8 @@ json.dump(s, open(f, "w"), ensure_ascii=False, indent=2)
 print("hook 등록:", f)
 PY
 done
+if command -v claude >/dev/null && ! claude plugin marketplace list 2>/dev/null | grep -q kir-local; then
+  claude plugin marketplace add "$C/plugins"
+fi
+
 echo "끝. 새 세션부터 적용된다."
