@@ -26,6 +26,24 @@ class T(unittest.TestCase):
         self.assertEqual(call("조사: 왜 느린지 fix 후보를 찾는다")[1], "")
         self.assertEqual(call("검토: 수정 내용 확인")[1], "")
 
+    def test_too_many_items_denies(self):
+        p = "구현한다\n고칠 파일: src/a.ts\n만들 것:\n1. a\n2. b\n3. c\n4. d\n5. e\n"
+        self.assertIn("규칙 16", json.loads(call(p)[1])["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_too_many_files_denies(self):
+        files = "\n".join(f"- src/f{i}.ts" for i in range(11))
+        self.assertIn("고칠 파일 11개", json.loads(call("구현한다\n고칠 파일:\n" + files)[1])["hookSpecificOutput"]["permissionDecisionReason"])
+
+    def test_size_ok_line_allows(self):
+        p = "구현한다\n크기 확인: 같은 파일 하나를 고치는 기계적 작업\n고칠 파일: src/a.ts\n만들 것:\n1. a\n2. b\n3. c\n4. d\n5. e\n"
+        self.assertEqual(call(p)[1], "")
+
+    def test_small_allows(self):
+        self.assertEqual(call("구현한다\n고칠 파일: src/a.ts, src/b.ts\n만들 것:\n1. a\n2. b\n")[1], "")
+
+    def test_company_worker_checked(self):
+        self.assertEqual(json.loads(call("버그를 고친다", typ="company-worker")[1])["hookSpecificOutput"]["permissionDecision"], "deny")
+
     def test_other_type_allows(self):
         self.assertEqual(call("버그를 고친다", typ="general-purpose")[1], "")
 

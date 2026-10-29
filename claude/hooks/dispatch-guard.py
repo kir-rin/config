@@ -16,10 +16,47 @@ REASON = ("구현·수정 지시에는 `고칠 파일:` 목록(path, 가능하�
           "조사·검토만이면 프롬프트 첫 줄을 `조사:` 또는 `검토:` 로 시작하세요.")
 
 
+# 크기 경고(subagent-plans.md 규칙 16 — 구현 agent 하나는 출력 40K 안쪽): 만들 것 번호 항목 > 4 또는 고칠 파일 > 10 이면 막는다.
+# 정말 한 agent 가 맞으면 프롬프트에 `크기 확인:` 줄로 이유를 적어 통과시킨다.
+MAX_ITEMS, MAX_FILES = 4, 10
+PATH = re.compile(r"[\w.-]+(?:/[\w.\[\]-]+)+\.(?:tsx?|mjs|cjs|jsx?|html|ya?ml|json|md|py|sql|prisma|css)\b")
+SIZE_OK = re.compile(r"^\s*크기 확인\s*:", re.M)
+
+
+def section(prompt, head):
+    """`<head>` 줄 다음부터, 들여쓰기·목록·번호가 아닌 새 문단 머리가 나올 때까지의 줄들."""
+    lines = prompt.splitlines()
+    out, on = [], False
+    for l in lines:
+        if not on:
+            if re.match(rf"^\s*(?:#+\s*)?{head}\s*(?:\(.*?\))?\s*:?", l):
+                on = True
+                rest = re.sub(rf"^\s*(?:#+\s*)?{head}\s*(?:\(.*?\))?\s*:?", "", l)
+                if rest.strip():
+                    out.append(rest)
+            continue
+        if l.strip() and not re.match(r"^\s|^-|^\d+\.|^\*", l):
+            break
+        out.append(l)
+    return out
+
+
+def size_reason(prompt):
+    if SIZE_OK.search(prompt):
+        return None
+    items = sum(1 for l in section(prompt, "만들 것") if re.match(r"^\s*\d+\.\s", l))
+    files = {m.group(0) for l in section(prompt, "고칠 파일") for m in PATH.finditer(l)}
+    if items > MAX_ITEMS or len(files) > MAX_FILES:
+        return (f"dispatch 가 커요(만들 것 {items}개 · 고칠 파일 {len(files)}개 — 상한 {MAX_ITEMS}·{MAX_FILES}). "
+                "subagent-plans.md 규칙 16: 기능별로 나눠 차례로 띄우세요. "
+                "정말 한 agent 가 맞으면 프롬프트에 `크기 확인: <이유>` 줄을 넣으세요.")
+    return None
+
+
 def decide(data):
     """-> deny 이유 문자열 또는 None."""
     ti = data.get("tool_input") or {}
-    if ti.get("subagent_type") != "worker":
+    if ti.get("subagent_type") not in ("worker", "company-worker"):
         return None
     prompt = ti.get("prompt")
     if not isinstance(prompt, str):
@@ -27,9 +64,11 @@ def decide(data):
     first = next((l.strip() for l in prompt.splitlines() if l.strip()), "")
     if re.match(r"^(조사|검토)\s*:", first):
         return None
-    if not WORK.search(prompt) or HAS_FILES.search(prompt):
+    if not WORK.search(prompt):
         return None
-    return REASON
+    if not HAS_FILES.search(prompt):
+        return REASON
+    return size_reason(prompt)
 
 
 def main():
