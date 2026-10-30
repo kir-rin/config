@@ -3,9 +3,12 @@
 
 막는 조건: subagent_type == worker, 프롬프트에 구현·수정 말(구현한다·고친다·수정·만든다·추가한다·바꾼다·implement·fix)이 있고,
 첫 줄이 `조사:`/`검토:` 가 아니며, `고칠 파일:` 또는 `## 고칠 파일` 줄이 없을 때.
+하나 더: 새 능력·모듈을 이름 박아 만들라는 지시(`능력 `x.y` … 만들`, `새 능력`)면 `재사용 확인:` 줄이 필요하다
+(viewkit-mcp 레포에서만 — 2026-10-30 사용자 결정).
 어떤 예외든 허용(exit 0)으로 빠진다. 표준 라이브러리만.
 """
 import json
+import os
 import re
 import sys
 
@@ -21,6 +24,50 @@ REASON = ("구현·수정 지시에는 `고칠 파일:` 목록(path, 가능하�
 MAX_ITEMS, MAX_FILES = 4, 10
 PATH = re.compile(r"[\w.-]+(?:/[\w.\[\]-]+)+\.(?:tsx?|mjs|cjs|jsx?|html|ya?ml|json|md|py|sql|prisma|css)\b")
 SIZE_OK = re.compile(r"^\s*크기 확인\s*:", re.M)
+
+
+# 새 능력·모듈을 이름 박아 만들라는 지시를 막는다(2026-10-30 사용자 결정 — 「능력 `hub.board` 를 만들라」고 이름을 박아
+# 시키자 subagent 가 기존 범용 능력을 찾지 않고 원본마다 새 능력을 만들었다). `재사용 확인: <이유>` 줄이 있으면 통과.
+# viewkit-mcp 레포(`docs/caps.md` 또는 `src/recipe/` 가 있는 레포)에서만 돈다 — 다른 레포 dispatch 에는 영향 없음.
+CAP_ID = r"`[a-z][\w.-]*\.[\w.-]+`"
+MAKE = r"만들|만든|구현|추가|신설"  # 「만든다」는 ㄹ 이 떨어져 `만들` 로는 안 잡힌다
+NEW_CAP = re.compile(
+    rf"새\s*(?:로운\s*)?(?:능력|모듈)(?![ \t]*(?:은|는|을|를)?[ \t]*(?:만들지|만든지|추가하지|안[ \t]*만들|안[ \t]*만든))"
+    rf"|능력[ \t]*{CAP_ID}[ \t]*(?:를|을|라는|이란)?[ \t]*(?:새로[ \t]*)?(?:{MAKE})"
+    rf"|(?:{MAKE}|추가할|구현할|신설할)[ \t]*(?:새[ \t]*)?능력[ \t]*[:：]?[ \t]*{CAP_ID}",
+    re.I)
+REUSE_OK = re.compile(r"^\s*(?:#+\s*)?재사용 확인\s*:", re.M)
+REUSE_REASON = ("새 능력 이름을 지시에 박지 마세요 — subagent 가 기존 범용 능력을 찾지 않고 원본마다 새 능력을 만듭니다. "
+                "「기존 능력(범용 api.get·rows.* 등)으로 먼저 찾아 쓰고, 정말 새 능력이 필요하면 이유를 보고」로 쓰거나, "
+                "`재사용 확인: <기존 것으로 왜 안 되는지 한 줄>` 줄을 넣으세요.")
+REPO_MARKS = ("docs/caps.md", "src/recipe")
+ABS_PATH = re.compile(r"(?:~|/)[\w.@+-]*(?:/[\w.@+-]+)+")
+
+
+def is_viewkit(path):
+    """path(파일이면 그 폴더)부터 위로 올라가며 viewkit-mcp 레포인지 본다."""
+    d = os.path.abspath(os.path.expanduser(path))
+    if os.path.isfile(d):
+        d = os.path.dirname(d)
+    while True:
+        if any(os.path.exists(os.path.join(d, m)) for m in REPO_MARKS):
+            return True
+        up = os.path.dirname(d)
+        if up == d:
+            return False
+        d = up
+
+
+def in_viewkit_repo(data, prompt):
+    """hook 입력의 cwd 또는 프롬프트 속 경로가 viewkit-mcp 레포일 때만 True."""
+    cands = [data.get("cwd")] + ABS_PATH.findall(prompt)[:20]
+    return any(c and is_viewkit(c) for c in cands)
+
+
+def reuse_reason(data, prompt):
+    if REUSE_OK.search(prompt) or not NEW_CAP.search(prompt):
+        return None
+    return REUSE_REASON if in_viewkit_repo(data, prompt) else None
 
 
 def section(prompt, head):
@@ -68,7 +115,7 @@ def decide(data):
         return None
     if not HAS_FILES.search(prompt):
         return REASON
-    return size_reason(prompt)
+    return size_reason(prompt) or reuse_reason(data, prompt)
 
 
 def main():

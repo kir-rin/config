@@ -1,4 +1,4 @@
-import json, os, subprocess, sys, unittest
+import json, os, subprocess, sys, tempfile, unittest
 
 HOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dispatch-guard.py")
 
@@ -8,8 +8,59 @@ def run(raw):
     return r.returncode, r.stdout
 
 
-def call(prompt, typ="worker"):
-    return run(json.dumps({"tool_name": "Agent", "tool_input": {"subagent_type": typ, "prompt": prompt}}))
+def call(prompt, typ="worker", cwd=None):
+    data = {"tool_name": "Agent", "tool_input": {"subagent_type": typ, "prompt": prompt}}
+    if cwd:
+        data["cwd"] = cwd
+    return run(json.dumps(data))
+
+
+class ViewkitRepo(unittest.TestCase):
+    """새 능력 이름 박기 검사 — viewkit-mcp 레포(`src/recipe/` 있음)에서만 돈다."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.repo = os.path.join(self.tmp.name, "viewkit-mcp")
+        os.makedirs(os.path.join(self.repo, "src", "recipe"))
+        self.other = os.path.join(self.tmp.name, "other-repo")
+        os.makedirs(self.other)
+
+    def reason(self, out):
+        return json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+
+    def test_named_new_capability_denies(self):
+        p = "능력 `hub.board` 를 만든다.\n고칠 파일: src/caps/hub-board.ts"
+        self.assertIn("재사용 확인", self.reason(call(p, cwd=self.repo)[1]))
+
+    def test_new_capability_word_denies(self):
+        p = "새 능력을 하나 추가한다.\n고칠 파일: src/caps/x.ts"
+        self.assertIn("재사용 확인", self.reason(call(p, cwd=self.repo)[1]))
+
+    def test_prompt_path_in_viewkit_denies(self):
+        p = (f"{self.repo}/src/caps/hub-board.ts 에 새 능력을 만든다.\n"
+             f"고칠 파일: {self.repo}/src/caps/hub-board.ts")
+        self.assertIn("재사용 확인", self.reason(call(p, cwd=self.other)[1]))
+
+    def test_reuse_line_allows(self):
+        p = ("능력 `hub.board` 를 만든다.\n재사용 확인: 범용 api.get 은 Hub 공개 API 의 menuId 조회를 못 한다\n"
+             "고칠 파일: src/caps/hub-board.ts")
+        self.assertEqual(call(p, cwd=self.repo)[1], "")
+
+    def test_no_new_capability_allows(self):
+        p = "능력 `rows.join` 에 `reuse` 칸을 추가한다.\n고칠 파일: src/recipe/caps.ts"
+        self.assertEqual(call(p, cwd=self.repo)[1], "")
+
+    def test_other_repo_allows(self):
+        p = "능력 `hub.board` 를 만든다.\n고칠 파일: src/caps/hub-board.ts"
+        self.assertEqual(call(p, cwd=self.other)[1], "")
+
+    def test_research_allows(self):
+        self.assertEqual(call("조사: 새 능력이 필요한지 본다", cwd=self.repo)[1], "")
+
+    def test_negated_new_capability_allows(self):
+        p = "능력 `rows.classify` 를 고친다. 새 능력은 만들지 않는다.\n고칠 파일: src/recipe/caps.ts"
+        self.assertEqual(call(p, cwd=self.repo)[1], "")
 
 
 class T(unittest.TestCase):
