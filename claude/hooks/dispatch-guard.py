@@ -3,7 +3,8 @@
 
 막는 조건: subagent_type == worker, 프롬프트에 구현·수정 말(구현한다·고친다·수정·만든다·추가한다·바꾼다·implement·fix)이 있고,
 첫 줄이 `조사:`/`검토:` 가 아니며, `고칠 파일:` 또는 `## 고칠 파일` 줄이 없을 때.
-하나 더: 새 능력·모듈을 이름 박아 만들라는 지시(`능력 `x.y` … 만들`, `새 능력`)면 `재사용 확인:` 줄이 필요하다
+하나 더: 새 능력·모듈을 만들라는 지시(`능력 `x.y` … 만들`, `새 능력`)면 `추상화:` 줄이 필요하다
+— 능력은 원본·업무 이름이 아니라 일반 동작으로 만들고 바뀌는 것은 레시피 설정으로 뺀다
 (viewkit-mcp 레포에서만 — 2026-10-30 사용자 결정).
 어떤 예외든 허용(exit 0)으로 빠진다. 표준 라이브러리만.
 """
@@ -26,8 +27,9 @@ PATH = re.compile(r"[\w.-]+(?:/[\w.\[\]-]+)+\.(?:tsx?|mjs|cjs|jsx?|html|ya?ml|js
 SIZE_OK = re.compile(r"^\s*크기 확인\s*:", re.M)
 
 
-# 새 능력·모듈을 이름 박아 만들라는 지시를 막는다(2026-10-30 사용자 결정 — 「능력 `hub.board` 를 만들라」고 이름을 박아
-# 시키자 subagent 가 기존 범용 능력을 찾지 않고 원본마다 새 능력을 만들었다). `재사용 확인: <이유>` 줄이 있으면 통과.
+# 새 능력·모듈을 만들라는 지시에 `추상화:` 줄을 요구한다(2026-10-30 사용자 결정 — 「능력 `hub.board` 를 만들라」고
+# 원본 이름을 박아 시키자 subagent 가 기존 범용 능력을 찾지 않고 원본마다 새 능력을 만들었다).
+# 목표는 「새 능력 이름을 박지 마라」가 아니라 「능력을 만들 때 추상화된 것(일반 동작)으로 남겨라」다.
 # viewkit-mcp 레포(`docs/caps.md` 또는 `src/recipe/` 가 있는 레포)에서만 돈다 — 다른 레포 dispatch 에는 영향 없음.
 CAP_ID = r"`[a-z][\w.-]*\.[\w.-]+`"
 MAKE = r"만들|만든|구현|추가|신설"  # 「만든다」는 ㄹ 이 떨어져 `만들` 로는 안 잡힌다
@@ -36,10 +38,18 @@ NEW_CAP = re.compile(
     rf"|능력[ \t]*{CAP_ID}[ \t]*(?:를|을|라는|이란)?[ \t]*(?:새로[ \t]*)?(?:{MAKE})"
     rf"|(?:{MAKE}|추가할|구현할|신설할)[ \t]*(?:새[ \t]*)?능력[ \t]*[:：]?[ \t]*{CAP_ID}",
     re.I)
-REUSE_OK = re.compile(r"^\s*(?:#+\s*)?재사용 확인\s*:", re.M)
-REUSE_REASON = ("새 능력 이름을 지시에 박지 마세요 — subagent 가 기존 범용 능력을 찾지 않고 원본마다 새 능력을 만듭니다. "
-                "「기존 능력(범용 api.get·rows.* 등)으로 먼저 찾아 쓰고, 정말 새 능력이 필요하면 이유를 보고」로 쓰거나, "
-                "`재사용 확인: <기존 것으로 왜 안 되는지 한 줄>` 줄을 넣으세요.")
+ABSTRACT_OK = re.compile(r"^\s*(?:#+\s*)?(?:추상화|재사용 확인)\s*:", re.M)  # 옛 이름 `재사용 확인:` 도 같은 뜻
+ABSTRACT_REASON = ("새 능력은 원본·업무 이름이 아니라 일반 동작으로 만들고, 바뀌는 것은 레시피 설정으로 빼세요. "
+                   "지시에 `추상화: <일반 동작> — <설정으로 뺄 것>` 줄을 넣으세요"
+                   "(기존 일반 능력으로 되면 그걸 쓰라고 적어도 됩니다).")
+# 원본 이름이 앞에 박힌 id(`hub.board`·`sono.usage`)는 막지 않고 경고만 한다 — 판단은 사람·AI 몫.
+# 앞부분이 아래 일반 낱말이면 통과, 아니면 원본·업무 이름으로 본다(단순한 어림).
+CAP_ANY = re.compile(r"`([a-z][\w-]*)\.([\w.-]+)`", re.I)
+GENERIC = frozenset("""api rows row cells cell table tab tabs card cards ui list text num date time
+file sheet excel json http csv grid form data db sql events event span join classify between sum
+schedule get post read write fetch split merge sort filter group map calc compute render print
+export import notify mail slack""".split())
+NAME_NOTE = "이름이 원본에 묶여 있어요 — 동작 이름을 고려하세요."
 REPO_MARKS = ("docs/caps.md", "src/recipe")
 ABS_PATH = re.compile(r"(?:~|/)[\w.@+-]*(?:/[\w.@+-]+)+")
 
@@ -64,10 +74,19 @@ def in_viewkit_repo(data, prompt):
     return any(c and is_viewkit(c) for c in cands)
 
 
-def reuse_reason(data, prompt):
-    if REUSE_OK.search(prompt) or not NEW_CAP.search(prompt):
+def name_bound(prompt):
+    """원본·업무 이름이 앞에 박힌 능력 id 가 프롬프트에 있나(`hub.board`·`sono.usage`)."""
+    return any(m.group(1).lower() not in GENERIC for m in CAP_ANY.finditer(prompt))
+
+
+def abstract_check(data, prompt):
+    """-> ("deny"|"warn", 문구) 또는 None."""
+    if not NEW_CAP.search(prompt) or not in_viewkit_repo(data, prompt):
         return None
-    return REUSE_REASON if in_viewkit_repo(data, prompt) else None
+    note = (" " + NAME_NOTE) if name_bound(prompt) else ""
+    if ABSTRACT_OK.search(prompt):
+        return ("warn", f"dispatch-guard: {NAME_NOTE} (막지는 않았습니다 — `추상화:` 줄 확인됨)") if note else None
+    return ("deny", ABSTRACT_REASON + note)
 
 
 def section(prompt, head):
@@ -101,7 +120,7 @@ def size_reason(prompt):
 
 
 def decide(data):
-    """-> deny 이유 문자열 또는 None."""
+    """-> ("deny"|"warn", 문구) 또는 None."""
     ti = data.get("tool_input") or {}
     if ti.get("subagent_type") not in ("worker", "company-worker"):
         return None
@@ -114,19 +133,27 @@ def decide(data):
     if not WORK.search(prompt):
         return None
     if not HAS_FILES.search(prompt):
-        return REASON
-    return size_reason(prompt) or reuse_reason(data, prompt)
+        return ("deny", REASON)
+    size = size_reason(prompt)
+    if size:
+        return ("deny", size)
+    return abstract_check(data, prompt)
 
 
 def main():
     try:
-        reason = decide(json.loads(sys.stdin.read()))
+        out = decide(json.loads(sys.stdin.read()))
     except Exception:
         return
-    if reason:
+    if not out:
+        return
+    kind, msg = out
+    if kind == "deny":
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                                   "permissionDecision": "deny",
-                                                  "permissionDecisionReason": reason}}, ensure_ascii=False))
+                                                  "permissionDecisionReason": msg}}, ensure_ascii=False))
+    else:
+        print(json.dumps({"systemMessage": msg}, ensure_ascii=False))  # 막지 않고 알리기만
 
 
 if __name__ == "__main__":

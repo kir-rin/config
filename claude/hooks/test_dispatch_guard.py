@@ -16,7 +16,7 @@ def call(prompt, typ="worker", cwd=None):
 
 
 class ViewkitRepo(unittest.TestCase):
-    """새 능력 이름 박기 검사 — viewkit-mcp 레포(`src/recipe/` 있음)에서만 돈다."""
+    """추상화 검사 — 능력을 만들라는 지시에 `추상화:` 줄을 요구한다. viewkit-mcp 레포(`src/recipe/` 있음)에서만 돈다."""
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -31,21 +31,44 @@ class ViewkitRepo(unittest.TestCase):
 
     def test_named_new_capability_denies(self):
         p = "능력 `hub.board` 를 만든다.\n고칠 파일: src/caps/hub-board.ts"
-        self.assertIn("재사용 확인", self.reason(call(p, cwd=self.repo)[1]))
+        r = self.reason(call(p, cwd=self.repo)[1])
+        self.assertIn("추상화: <일반 동작>", r)
+        self.assertIn("레시피 설정", r)
+        self.assertIn("이름이 원본에 묶여", r)  # 원본 이름이 박힌 id — 막는 이유에 덧붙인다
+
+    def test_generic_new_capability_denies_without_name_note(self):
+        p = "새 능력 `rows.span` 을 만든다.\n고칠 파일: src/recipe/caps.ts"
+        r = self.reason(call(p, cwd=self.repo)[1])
+        self.assertIn("추상화: <일반 동작>", r)
+        self.assertNotIn("이름이 원본에 묶여", r)  # 일반 낱말이 앞에 온 id 는 이름 경고 없음
 
     def test_new_capability_word_denies(self):
         p = "새 능력을 하나 추가한다.\n고칠 파일: src/caps/x.ts"
-        self.assertIn("재사용 확인", self.reason(call(p, cwd=self.repo)[1]))
+        self.assertIn("추상화: <일반 동작>", self.reason(call(p, cwd=self.repo)[1]))
 
     def test_prompt_path_in_viewkit_denies(self):
         p = (f"{self.repo}/src/caps/hub-board.ts 에 새 능력을 만든다.\n"
              f"고칠 파일: {self.repo}/src/caps/hub-board.ts")
-        self.assertIn("재사용 확인", self.reason(call(p, cwd=self.other)[1]))
+        self.assertIn("추상화: <일반 동작>", self.reason(call(p, cwd=self.other)[1]))
 
-    def test_reuse_line_allows(self):
-        p = ("능력 `hub.board` 를 만든다.\n재사용 확인: 범용 api.get 은 Hub 공개 API 의 menuId 조회를 못 한다\n"
-             "고칠 파일: src/caps/hub-board.ts")
+    def test_abstract_line_allows(self):
+        p = ("능력 `rows.span` 를 만든다.\n추상화: events.span — 원본 주소·키·날짜 칸은 레시피 설정으로\n"
+             "고칠 파일: src/recipe/caps.ts")
         self.assertEqual(call(p, cwd=self.repo)[1], "")
+
+    def test_reuse_line_still_allows(self):
+        p = ("능력 `rows.span` 를 만든다.\n재사용 확인: 범용 api.get 은 기간 계산을 못 한다\n"
+             "고칠 파일: src/recipe/caps.ts")
+        self.assertEqual(call(p, cwd=self.repo)[1], "")
+
+    def test_name_bound_id_with_abstract_line_warns_only(self):
+        p = ("능력 `hub.board` 를 만든다.\n추상화: api.get — 원본 주소·키는 레시피 설정으로\n"
+             "고칠 파일: src/caps/hub-board.ts")
+        rc, out = call(p, cwd=self.repo)
+        self.assertEqual(rc, 0)
+        msg = json.loads(out)["systemMessage"]  # 막지 않고 알리기만
+        self.assertIn("이름이 원본에 묶여", msg)
+        self.assertNotIn("permissionDecision", out)
 
     def test_no_new_capability_allows(self):
         p = "능력 `rows.join` 에 `reuse` 칸을 추가한다.\n고칠 파일: src/recipe/caps.ts"
