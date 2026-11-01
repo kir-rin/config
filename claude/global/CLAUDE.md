@@ -12,6 +12,7 @@
   비교는 표로, 파일은 `path:line`. 사용자가 「자세히」라고 할 때만 넘긴다. 상세 → `~/config/claude/global/answer-format.md`.
 - **ADR·지난 결정은 그때의 판단이다.** 새 요청이 어긋나면 그쪽으로 끌지 말고 「ADR n 전제 X 와 어긋남」 한 줄 알린 뒤 새 요청 기준으로 설계, ADR 에 대체됨을 단다(2026-10-31).
 - **상태·알림·예외를 늘리기 전에 「덜기 후보」 표로 묻는다**(남길 것은 안전선뿐 — `~/config/claude/subagent-plans.md` 22번, 2026-11-01).
+- **안전선 아닌 대비책은 실제 운영 기록에 신호가 남은 뒤에 만든다** — 그 전엔 「보류 + 되살릴 신호」(같은 파일 23번, 2026-11-01).
 - **subagent 는 `worker` 타입으로 띄운다**(MCP·스킬 없이 파일·셸·웹 도구만 — 시작 맥락 약 48K → 14K).
   Workflow 스크립트에서는 `agent(..., { agentType: 'worker' })`. 캔버스·아티팩트 일은 `artifact-worker`(Artifact 만 더함), 사내 시스템(One MCP)·봇 준비 일은 `company-worker`(One MCP 메타툴만 더함). 그 밖의 MCP·스킬이 꼭 필요한 일만 다른 타입으로.
 - **subagent·워크플로우 결과는 보고만 보고 받지 않는다.** 받기 전에 실제 결과물(diff·파일·명령 출력) 하나는 직접 본다 — 보고는 검증 안 된 주장(pstack prove-it-works, 2026-10-31).
