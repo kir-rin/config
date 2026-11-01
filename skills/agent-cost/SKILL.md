@@ -12,6 +12,7 @@ python3 ~/config/claude/subagent-templates/agent-cost.py --chart
 ```
 
 - 특정 실행: `--chart --run <id>` (id = `wf_…` 또는 단독 agent id).
+- **돌고 있는 subagent 하나**(이력은 멈출 때 쌓여 `--run` 이 「이력에 없다」고 한다): `agent-cost.py <세션 폴더>/subagents/agent-<id>.jsonl --chart`. 세션 폴더는 `~/.claude/projects/<프로젝트>/<세션 id>/`(게이트웨이 설정도 `projects` 가 여기로 링크).
 - 아직 이력에 없는 진행 중 워크플로우: `agent-cost.py <워크플로우 transcript 폴더> --chart`.
   폴더는 `~/.claude/projects/<프로젝트>/<세션>/subagents/workflows/wf_*`.
 - 신호를 새로 더한 뒤 옛 run 다시 계산: `agent-cost.py <wf 폴더> --rebuild-run <wf id>`.
