@@ -17,6 +17,7 @@
 - **subagent 는 `worker` 타입으로 띄운다**(MCP·스킬 없이 파일·셸·웹 도구만 — 시작 맥락 약 48K → 14K).
   Workflow 스크립트에서는 `agent(..., { agentType: 'worker' })`. 캔버스·아티팩트 일은 `artifact-worker`(Artifact 만 더함), 사내 시스템(One MCP)·봇 준비 일은 `company-worker`(One MCP 메타툴만 더함). 그 밖의 MCP·스킬이 꼭 필요한 일만 다른 타입으로.
 - **subagent·워크플로우 결과는 보고만 보고 받지 않는다.** 받기 전에 실제 결과물(diff·파일·명령 출력) 하나는 직접 본다 — 보고는 검증 안 된 주장(pstack prove-it-works, 2026-10-31).
+  분석·조사 보고면 추천·결정을 바꾸는 주장(원인·숫자·「있다/없다」)마다 원본을 한 번씩 확인하고, 확인 못 한 것은 「확인 안 됨」을 붙여 전한다 — 인용 표본만으로 주장을 받지 않는다(2026-11-02).
 - 워크플로우·subagent 결과를 받으면 `agent-cost.py --chart --run <id>` 그림을 짧게 함께 보여 준다(`agent-cost` 스킬).
 
 ## 이럴 때 이 파일을 먼저 읽는다
