@@ -28,3 +28,4 @@
 | AFFiNE | `~/config/claude/affine.md` |
 | 회의 내용을 기능목록·코드에 반영 | `~/config/claude/meeting-intake.md` |
 | 계획(과업 여러 개)을 subagent 로 실행 | `~/config/claude/subagent-plans.md` |
+| 리뷰어를 돌리고 지적을 받을 때(1층 찾기 → 2층 덜기 `subtract-review` → 3층 사용자) | `~/config/claude/subagent-plans.md` 23번 |
