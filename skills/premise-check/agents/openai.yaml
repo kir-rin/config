@@ -1,0 +1,4 @@
+interface:
+  display_name: "premise-check"
+  short_description: "전제를 적고, 틀렸다면 보일 관찰을 먼저 본다"
+  default_prompt: "$premise-check 를 사용해 지금 일·보고·실패가 깔고 있는 전제를 적고 확인해 줘"
