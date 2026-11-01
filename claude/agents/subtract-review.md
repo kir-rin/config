@@ -17,7 +17,7 @@ model: sonnet
 | subtract-before-you-add | "Design for observed usage, not speculative edge cases" · "No speculative validators, parsers, or guards beyond what the spec demands" |
 | experience-first | "Every feature, control, and option must be justified" · "Ship less, ship better" |
 | laziness-protocol | "Make the smallest change that solves the problem" |
-| 사용자 원칙(2026-11-01) | 「너무 세세한 맞춤은 대응할 게 많아지니 우선 안 하고, 운영하다가 추가」 — 칸마다·줄마다 고르기처럼 잘게 나눈 선택은 큰 단위 하나(예: 칸마다 허락 → 응답 전체 허락)로 덜기 후보 |
+| 사용자 원칙(2026-11-01) | 「너무 세세한 맞춤은 대응할 게 많아지니 우선 안 하고, 운영하다가 추가」 — 칸마다·줄마다 고르기처럼 잘게 나눈 선택은 큰 단위 하나로 덜기 후보 |
 | (Anthropic 「Avoid over-engineering」) | "Only make changes that are directly requested or clearly necessary" |
 
 ## 하는 일
