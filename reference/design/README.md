@@ -29,3 +29,5 @@
 | `skills-scout.md` | 디자인 레퍼런스 모으는 스킬·MCP 조사 |
 | `x-moodboards.md` | X 무드보드(디자인 언어 2갈래 · 부품) — 계정·링크·좋아요·가져올 점 |
 | `tips.md` | 팁 모음(조사 중) |
+| `landing-refs.md` | 랜딩 디자인 참고 링크 모음 · 채택한 스타일 「B 눈길 끄는」 |
+| `landing-b-bold.html` | 「B 눈길 끄는」 랜딩 예시(자체 완결 HTML) |
