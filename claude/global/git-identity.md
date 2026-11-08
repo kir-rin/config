@@ -17,6 +17,6 @@
   우회하지 않는다.
 - **예외(2026-10-19 사용자 결정, 2026-10-20 `~/oss/herdr-t3` 추가):** 개인 저장소 `~/oss/herdr-bar`(kir-rin/herdr-bar)·`~/oss/herdr-t3`(kir-rin/herdr-t3)만
   `kir-rin <53514545+kir-rin@users.noreply.github.com>` 으로 커밋·push 한다. 저장소 로컬 설정에
-  박혀 있다. 개인 gmail 은 여기서도 쓰지 않는다. 다른 저장소로 넓히지 않는다.
+  박혀 있다. 개인 gmail 은 여기서도 쓰지 않는다. `~/config`(kir-rin/config, 2026-11-08 사용자 결정)도 같다. 다른 저장소로 넓히지 않는다.
   (2026-10-26 추가: `~/Krafton/infra/knowledge-graph` → kir-rin/personal-kb 도 같은 예외. 로컬 설정에 박음.)
   (2026-10-28 추가: `~/config` 도 같은 예외. 로컬 설정 이메일을 gmail 에서 noreply 로 바꿈.)
