@@ -1,0 +1,4 @@
+interface:
+  display_name: "working-backwards"
+  short_description: "기한 날의 한 문장에서 거꾸로 필수만 정하고, 새 아이디어는 보류 표로"
+  default_prompt: "$working-backwards 를 사용해 이 일의 기한 메모를 쓰고 필수를 정해 줘"

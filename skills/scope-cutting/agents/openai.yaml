@@ -1,0 +1,4 @@
+interface:
+  display_name: "scope-cutting"
+  short_description: "쓸 시간을 먼저 정하고 범위를 깎는다(Shape Up)"
+  default_prompt: "$scope-cutting 를 사용해 이 일의 범위에서 첫 판에 뺄 것을 골라 줘"
