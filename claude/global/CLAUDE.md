@@ -22,12 +22,13 @@
 - **subagent·워크플로우 결과는 보고만 보고 받지 않는다.** 받기 전에 실제 결과물(diff·파일·명령 출력) 하나는 직접 본다 — 보고는 검증 안 된 주장(pstack prove-it-works, 2026-10-31).
   분석·조사 보고의 원인·숫자·「있다/없다」를 결정에 쓰기 전, 일을 시작하기 전, 같은 전제의 고침이 두 번 실패했을 때는 `premise-check` 스킬을 따른다 — 전제를 적고 「틀렸다면 무엇이 보여야 하나」를 본다. 시각·건수·mtime 맞춰 보기는 확인이 아니고, 확인 못 한 주장엔 「확인 안 됨」(2026-11-02).
 - 워크플로우·subagent 결과를 받으면 `agent-cost.py --chart --run <id>` 그림을 짧게 함께 보여 준다(`agent-cost` 스킬).
+- **오래 걸리는 일(1분 넘는 시험·빌드·대기)은 메인에서 하지 않는다** — `worker` subagent 하나에 끝 조건과 함께 맡기고, 메인은 **예상×1.5 에 한 번만** 깨어나 산출물(커밋·파일)로 살았는지 본다. 고정 주기 확인·메시지로 깨우기 없음. 사용자에겐 되돌릴 수 없는 일·진짜 결정만 묻는다(2026-11-08, 시험 재시도를 메인이 5번 돌린 뒤). 상세·pstack 근거 → `~/config/claude/global/long-tasks.md`.
 
 ## 이럴 때 이 파일을 먼저 읽는다
 | 상황 | 읽을 것 |
 | --- | --- |
 | herdr tab·pane·세션 fork, 작업 위임 경로, Orca, 브라우저 작업, 과제 그림(Obsidian) | `~/config/claude/global/workspace-tools.md` |
-| 한 세션에 안 끝날 긴 작업 | `~/config/claude/global/long-tasks.md` |
+| 한 세션에 안 끝날 긴 작업, 1분 넘는 시험·빌드·대기를 subagent 에 맡길 때 | `~/config/claude/global/long-tasks.md` |
 | 외부 요청자 요건·피드백 정리, 회신·확인 요청 | `~/config/claude/global/source-grounding.md` |
 | 사내 과거 논의·결정·회의를 물을 때, 에이전트 펫 브리핑 | `~/config/claude/global/kg.md` (로컬 전용, 공개 레포 제외) |
 | brainstorming 의 질문 단계 | `~/config/claude/global/brainstorming.md` |
