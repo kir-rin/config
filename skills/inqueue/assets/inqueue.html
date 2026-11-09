@@ -90,7 +90,9 @@ input[type=checkbox]{accent-color:var(--accent)}
 .ai-text.none{color:var(--faint);background:none;padding:4px 0}
 .actions{display:flex;flex-wrap:wrap;gap:14px;align-items:center;position:sticky;bottom:env(safe-area-inset-bottom,0px);background:var(--bg);padding-block:12px}
 .save{background:var(--accent);color:var(--on-accent);font-weight:600;border-radius:7px;padding:7px 18px}
-.del{color:var(--faint);font-size:14px}
+.act{color:var(--sub);font-weight:500;border-radius:7px;padding:7px 10px}
+.act:hover{background:var(--hover)}
+.del{color:var(--faint);font-size:13px}
 .del:hover{color:var(--danger)}
 .note{color:var(--sub);font-size:13px}
 </style>
@@ -191,7 +193,11 @@ function renderEditor() {
   const t = tickets.find((x) => x.id === selected);
   if (!t) { $('editor').replaceChildren(el('p', { className: 'empty', textContent: '왼쪽에서 티켓을 고르면 여기에 열려요.' })); return; }
   const note = el('span', { className: 'note', id: 'note' });
-  const statusSel = el('select', { id: 'f-status' }, ...STATUSES.map((s) => el('option', { value: s, textContent: s, selected: s === t.status })));
+  // 상태는 고르지 않고 버튼으로 넘긴다. 버튼은 지금 칸 저장과 상태 변경을 한 번에 한다
+  const act = (label, next, cls = 'act') => el('button', { type: 'submit', className: cls, textContent: label, value: next });
+  const buttons = t.status === 'me' ? [act('AI에게 넘기기', 'ai', 'save'), act('저장', '', 'act'), act('완료', 'done')]
+    : t.status === 'done' ? [act('다시 열기', 'ai', 'save')]
+    : [act('저장', '', 'save'), act('완료', 'done')];
   const safe = el('input', { type: 'checkbox', id: 'f-safe', checked: !!t.safe });
   const title = el('textarea', { id: 'f-title', value: t.title || '', rows: 1, maxLength: 200, placeholder: '제목 없음', onkeydown: (e) => { if (e.key === 'Enter') e.preventDefault(); } });
   title.setAttribute('aria-label', '제목');
@@ -210,7 +216,7 @@ function renderEditor() {
   const form = el('form', { oninput: (e) => { dirty = true; note.textContent = '저장 전이에요.'; if (e.target.tagName === 'TEXTAREA') grow(e.target); }, onsubmit: async (e) => {
     e.preventDefault();
     // 바뀐 칸만 쓴다 — 페이지를 열어 둔 사이 AI 가 적은 다른 칸을 덮지 않게
-    const values = { title: title.value.trim(), status: statusSel.value, safe: safe.checked };
+    const values = { title: title.value.trim(), status: (e.submitter && e.submitter.value) || t.status, safe: safe.checked };
     for (const [k, , who] of FIELDS) if (who === '나') values[k] = $(`f-${k}`).value;
     const body = {};
     for (const k of Object.keys(values)) if (values[k] !== (t[k] ?? (k === 'safe' ? false : ''))) body[k] = values[k];
@@ -220,12 +226,12 @@ function renderEditor() {
     } catch (err) { note.textContent = err && err.code === 'invalid_argument' ? '이 계정은 고칠 권한이 없어요.' : '저장하지 못했어요. 다시 눌러 주세요.'; }
   } },
     title,
-    el('div', { className: 'props' }, el('label', {}, '상태', statusSel), el('label', {}, safe, '구현해도 됨')),
+    el('div', { className: 'props' }, el('span', {}, '상태 ', el('b', { textContent: t.status })), el('label', {}, safe, '구현해도 됨')),
     el('section', { className: 'zone' }, el('h3', { textContent: '판단' }), areas[0], areas[1]),
     el('section', { className: 'zone' }, el('h3', { textContent: '배경' }), el('div', { className: 'two' }, areas[2], areas[3])),
     el('details', { className: 'zone log', open: logOpen, ontoggle: (e) => { logOpen = e.target.open; } },
       el('summary', {}, '조사·구현 기록', el('small', { className: 'chip ai', textContent: 'Claude' })), areas[4].lastChild),
-    el('div', { className: 'actions' }, el('button', { type: 'submit', className: 'save', textContent: '저장' }), del, note));
+    el('div', { className: 'actions' }, ...buttons, del, note));
   $('editor').replaceChildren(form);
   growAll();
 }
