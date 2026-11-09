@@ -1,0 +1,265 @@
+<title>__INQUEUE_TITLE__</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+@font-face{font-family:"Pretendard";src:url("PretendardVariable.woff2") format("woff2");font-weight:45 920;font-display:swap}
+/* 왼쪽은 상태별 목록, 오른쪽은 문서처럼 읽히는 티켓 한 장. 테두리 대신 여백으로 나눈다 */
+:root{
+  --bg:#ffffff;--fg:#191919;--sub:#6b6b6b;--faint:#9b9b9b;--hover:#f4f4f4;--selected:#ededed;--line:#ececec;
+  --accent:#5e6ad2;--on-accent:#ffffff;--danger:#c0392b;
+  --sans:"Pretendard",-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#191919;--fg:#ededed;--sub:#a0a0a0;--faint:#757575;--hover:#242424;--selected:#2c2c2c;--line:#2c2c2c;
+  --accent:#8b95ea;--on-accent:#14161f;--danger:#ef8f84;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#191919;--fg:#ededed;--sub:#a0a0a0;--faint:#757575;--hover:#242424;--selected:#2c2c2c;--line:#2c2c2c;
+  --accent:#8b95ea;--on-accent:#14161f;--danger:#ef8f84;color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font:13.5px/1.65 var(--sans);letter-spacing:-.01em;word-break:keep-all;overflow-wrap:anywhere;-webkit-font-smoothing:antialiased;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:32px 64px}
+.cols{max-width:76rem;margin:0 auto;display:grid;grid-template-columns:minmax(0,19rem) minmax(0,1fr);gap:24px;align-items:start}
+@media (max-width:760px){.cols{grid-template-columns:minmax(0,1fr);gap:40px}}
+.queue{display:grid;gap:20px;min-width:0}
+@media (min-width:761px){.queue{position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px);max-height:calc(100dvh - 24px);overflow-y:auto}}
+h1{font-size:14px;font-weight:700;margin:0}
+.sub{margin:0;color:var(--sub);font-size:12px}
+.add input{font:inherit;color:inherit;width:100%;background:var(--hover);border:0;border-radius:8px;padding:8px 12px}
+.add input::placeholder,textarea::placeholder{color:var(--faint)}
+.group{display:grid;gap:2px}
+.group h2{font-size:11.5px;font-weight:600;color:var(--sub);margin:0;padding:0 10px 4px}
+.group h2 span{color:var(--faint);font-weight:400;margin-left:4px}
+ul{list-style:none;margin:0;padding:0;display:grid;gap:1px}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:baseline;width:100%;text-align:left;padding:6px 10px;border-radius:6px}
+.row:hover{background:var(--hover)}
+.row[aria-current=true]{background:var(--selected)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);align-self:center}
+.dot.me{background:var(--accent)}
+.dot.ai{background:none;box-shadow:inset 0 0 0 1.5px var(--faint)}
+.tags{font-size:11px;color:var(--faint);white-space:nowrap}
+.tags .busy{color:var(--accent);font-weight:600}
+.empty{color:var(--sub);margin:0;font-size:14px;padding:0 10px}
+.editor{min-width:0;max-width:46rem}
+.editor form{display:grid;gap:22px}
+.zone{display:grid;gap:14px;border-top:1px solid var(--line);padding-top:16px}
+.zone h3,.log summary{font-size:14px;font-weight:700;margin:0}
+.two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+@media (max-width:560px){.two{grid-template-columns:minmax(0,1fr)}}
+.log summary{cursor:pointer;display:flex;gap:6px;align-items:center;list-style:none}
+.log summary::-webkit-details-marker{display:none}
+.log summary::before{content:"";width:6px;height:6px;margin-inline:2px 4px;border-right:1.5px solid var(--faint);border-bottom:1.5px solid var(--faint);transform:rotate(-45deg);transition:transform .12s}
+.log[open] summary::before{transform:rotate(45deg)}
+@media (prefers-reduced-motion:reduce){.log summary::before{transition:none}}
+.log[open] summary{margin-bottom:10px}
+#f-judgment{background:var(--hover);min-height:4.8em;padding:10px 12px;margin-left:0;border-radius:8px}
+#f-judgment:focus{box-shadow:inset 0 0 0 1.5px var(--accent)}
+textarea{font:inherit;color:inherit;letter-spacing:inherit;width:100%;display:block;background:none;border:0;border-radius:6px;padding:4px 8px;margin-left:-8px;resize:none;overflow:hidden}
+textarea:hover{background:var(--hover)}
+textarea:focus{background:var(--hover);outline:none}
+#f-title{font-size:21px;font-weight:700;line-height:1.35;letter-spacing:-.02em}
+.props{display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin-top:-14px;color:var(--sub);font-size:12px}
+.props label{display:flex;gap:6px;align-items:center}
+select{font:inherit;color:var(--fg);font-weight:600;background:none;border:0;padding:2px 0;cursor:pointer}
+input[type=checkbox]{accent-color:var(--accent)}
+.field{display:grid;gap:2px}
+.field > span{font-size:12px;font-weight:500;color:var(--sub)}
+.field > span{display:flex;gap:6px;align-items:center}
+.chip{font-size:10.5px;font-weight:600;line-height:1.6;border-radius:4px;padding:0 6px;background:var(--selected);color:var(--sub)}
+.chip.ai{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}
+.ai-text p{margin:0 0 6px}
+.ai-text > :last-child{margin-bottom:0}
+.ai-text ul{display:block;list-style:disc;margin:2px 0 6px;padding-left:18px}
+.ai-text ul ul{list-style:circle;margin:2px 0 0}
+.ai-text ol{margin:2px 0 6px;padding-left:20px}
+.ai-text li > p{margin:0}
+.ai-text h1,.ai-text h2,.ai-text h3,.ai-text h4{font-size:13.5px;font-weight:700;margin:10px 0 4px}
+.ai-text > :first-child{margin-top:0}
+.ai-text strong{font-weight:650}
+.ai-text a{color:var(--accent)}
+.ai-text hr{border:0;border-top:1px solid var(--line);margin:10px 0}
+.ai-text blockquote{margin:0 0 6px;padding-left:10px;color:var(--sub);border-left:2px solid var(--line)}
+.ai-text table{display:block;overflow-x:auto;border-collapse:collapse;margin:0 0 6px;font-size:12.5px}
+.ai-text th,.ai-text td{padding:4px 12px 4px 0;text-align:left;border-bottom:1px solid var(--line)}
+.ai-text li{margin-block:3px}
+.ai-text li::marker{color:var(--faint)}
+.ai-text code,.ai-text pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:0}
+.ai-text code{font-size:.84em;background:color-mix(in srgb,var(--fg) 8%,transparent);border-radius:4px;padding:1px 5px}
+.ai-text pre{font-size:.84em;white-space:pre-wrap;margin:0 0 6px}
+.ai-text{background:color-mix(in srgb,var(--accent) 6%,transparent);border-radius:8px;padding:10px 12px;margin-top:4px}
+.ai-text.none{color:var(--faint);background:none;padding:4px 0}
+.actions{display:flex;flex-wrap:wrap;gap:14px;align-items:center;position:sticky;bottom:env(safe-area-inset-bottom,0px);background:var(--bg);padding-block:12px}
+.save{background:var(--accent);color:var(--on-accent);font-weight:600;border-radius:7px;padding:7px 18px}
+.del{color:var(--faint);font-size:14px}
+.del:hover{color:var(--danger)}
+.note{color:var(--sub);font-size:13px}
+</style>
+
+<div class="cols">
+  <section class="queue" aria-label="대기열">
+    <header>
+      <h1>__INQUEUE_TITLE__</h1>
+      <p class="sub" id="summary">티켓을 불러오는 중이에요.</p>
+    </header>
+    <form class="add" id="add">
+      <input type="text" id="newTitle" placeholder="새 티켓 제목을 쓰고 Enter" aria-label="새 티켓 제목" maxlength="200">
+    </form>
+    <div id="groups" class="queue"></div>
+  </section>
+  <section class="editor" id="editor" aria-label="티켓"></section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
+<script>
+const STATUSES = ['ai', 'me', 'done'];
+const GROUPS = ['me', 'ai', 'done'];
+const FIELDS = [
+  ['decide', '내가 정할 것', 'Claude'],
+  ['judgment', '내 판단', '나'],
+  ['why', '왜·무엇을', '나'],
+  ['done', '끝난 기준', '나'],
+  ['research', '조사·구현 기록', 'Claude'],
+];
+// 칸이 글 길이만큼 늘어나 칸 안에서 스크롤하지 않게 한다
+const grow = (a) => { a.style.height = 'auto'; a.style.height = `${a.scrollHeight}px`; };
+const growAll = () => document.querySelectorAll('.editor textarea').forEach(grow);
+addEventListener('resize', growAll);
+if (document.fonts) document.fonts.ready.then(growAll);
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...kids) => { const n = Object.assign(document.createElement(tag), props); n.append(...kids.filter((k) => k !== null)); return n; };
+const busy = (t) => t.status === 'ai' && t.claimedAt > Date.now() - 3600000;
+
+// Claude 칸의 마크다운(문단·목록·`코드`·**굵게**·코드 울타리). 글은 textContent 로만 넣는다
+// 백틱 없이 적힌 경로·파일:줄도 코드로 보인다. 「ai/me」 같은 낱말은 경로로 치지 않는다
+const isPath = (p) => /\.[a-zA-Z]\w{0,7}(:\d+(-\d+)?)?$/.test(p) || /:\d+(-\d+)?$/.test(p) || /^(~?\/|(src|docs|test|tests|scripts|config|examples|prisma|app|lib|packages)\/)/.test(p);
+function plainMd(s, out) {
+  const re = /(?<![\w./:~-])(?:~?\/)?(?:[\w.@-]+\/)*[\w.@-]*\w(?::\d+(?:-\d+)?)?/g;
+  let i = 0, m;
+  while ((m = re.exec(s))) {
+    if (!(m[0].includes('/') || /\.[a-zA-Z]\w{0,7}:\d+/.test(m[0])) || !isPath(m[0])) continue;
+    if (m.index > i) out.push(s.slice(i, m.index));
+    out.push(el('code', { textContent: m[0] }));
+    i = re.lastIndex;
+  }
+  if (i < s.length) out.push(s.slice(i));
+}
+function mdBlocks(text) {
+  if (!window.marked || !window.DOMPurify) return [el('p', { textContent: text, style: 'white-space:pre-wrap' })];
+  // 「A. 내용」 선택지는 글자를 굵게 해 눈에 띄게 한다
+  const src = text.replace(/^([A-Z])\.\s+/gm, '**$1.** ');
+  const root = el('div', { innerHTML: DOMPurify.sanitize(marked.parse(src, { gfm: true, breaks: true })) });
+  root.querySelectorAll('a').forEach((a) => { a.target = '_blank'; a.rel = 'noopener'; });
+  const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const texts = [];
+  while (walk.nextNode()) if (!walk.currentNode.parentElement.closest('code,pre,a')) texts.push(walk.currentNode);
+  for (const node of texts) {
+    const out = [];
+    plainMd(node.nodeValue, out);
+    if (out.some((x) => typeof x !== 'string')) node.replaceWith(...out);
+  }
+  return [...root.childNodes];
+}
+
+let db = null, tickets = [], selected = null, dirty = false, loaded = false, logOpen = true;
+
+function row(t) {
+  const tags = [t.safe ? 'safe' : null].filter(Boolean).join(' ');
+  const b = el('button', { type: 'button', className: 'row', onclick: () => select(t.id) },
+    el('span', { className: `dot ${t.status}` }),
+    el('span', { textContent: t.title || '(제목 없음)' }),
+    el('span', { className: 'tags' }, busy(t) ? el('span', { className: 'busy', textContent: '작업 중 ' }) : null, tags));
+  b.setAttribute('aria-current', String(t.id === selected));
+  return el('li', {}, b);
+}
+
+function renderList() {
+  const newest = (a, b) => (b.createdAt || 0) - (a.createdAt || 0);
+  const box = $('groups');
+  const known = (t) => STATUSES.includes(t.status);
+  const groups = GROUPS.map((s) => [s, tickets.filter((t) => t.status === s).sort(newest)]);
+  const rest = tickets.filter((t) => !known(t)).sort(newest);
+  if (rest.length) groups.push(['기타', rest]);
+  const shown = groups.filter(([, list]) => list.length);
+  if (shown.length) box.replaceChildren(...shown.map(([s, list]) => el('div', { className: 'group' }, el('h2', {}, s, el('span', { textContent: String(list.length) })), el('ul', {}, ...list.map(row)))));
+  else box.replaceChildren(loaded ? el('p', { className: 'empty', textContent: '티켓이 없어요. 위에 제목을 적어 첫 티켓을 만드세요.' }) : '');
+  if (loaded) $('summary').textContent = `내 차례 ${groups[0][1].length}장 · AI 차례 ${groups[1][1].length}장`;
+}
+
+function renderEditor() {
+  const t = tickets.find((x) => x.id === selected);
+  if (!t) { $('editor').replaceChildren(el('p', { className: 'empty', textContent: '왼쪽에서 티켓을 고르면 여기에 열려요.' })); return; }
+  const note = el('span', { className: 'note', id: 'note' });
+  const statusSel = el('select', { id: 'f-status' }, ...STATUSES.map((s) => el('option', { value: s, textContent: s, selected: s === t.status })));
+  const safe = el('input', { type: 'checkbox', id: 'f-safe', checked: !!t.safe });
+  const title = el('textarea', { id: 'f-title', value: t.title || '', rows: 1, maxLength: 200, placeholder: '제목 없음', onkeydown: (e) => { if (e.key === 'Enter') e.preventDefault(); } });
+  title.setAttribute('aria-label', '제목');
+  // Claude 가 쓰는 칸은 읽기 전용 — 사람은 고치지 않는다
+  const areas = FIELDS.map(([k, name, who]) => {
+    const head = el('span', {}, name, el('small', { className: who === 'Claude' ? 'chip ai' : 'chip', textContent: who }));
+    if (who === 'Claude') return el('div', { className: 'field' }, head, t[k] ? el('div', { className: 'ai-text' }, ...mdBlocks(t[k])) : el('div', { className: 'ai-text none', textContent: '아직 없음' }));
+    return el('label', { className: 'field' }, head, el('textarea', { id: `f-${k}`, value: t[k] || '', rows: 1, placeholder: '비어 있음' }));
+  });
+  let armed = false;
+  const del = el('button', { type: 'button', className: 'del', textContent: '삭제', onclick: async () => {
+    if (!armed) { armed = true; del.textContent = '한 번 더 누르면 삭제돼요'; return; }
+    try { await db.collection('tickets').doc(t.id).delete(); dirty = false; selected = null; renderEditor(); }
+    catch (e) { note.textContent = '삭제하지 못했어요. 다시 눌러 주세요.'; }
+  } });
+  const form = el('form', { oninput: (e) => { dirty = true; note.textContent = '저장 전이에요.'; if (e.target.tagName === 'TEXTAREA') grow(e.target); }, onsubmit: async (e) => {
+    e.preventDefault();
+    // 바뀐 칸만 쓴다 — 페이지를 열어 둔 사이 AI 가 적은 다른 칸을 덮지 않게
+    const values = { title: title.value.trim(), status: statusSel.value, safe: safe.checked };
+    for (const [k, , who] of FIELDS) if (who === '나') values[k] = $(`f-${k}`).value;
+    const body = {};
+    for (const k of Object.keys(values)) if (values[k] !== (t[k] ?? (k === 'safe' ? false : ''))) body[k] = values[k];
+    try {
+      if (Object.keys(body).length) await db.collection('tickets').doc(t.id).update(body);
+      dirty = false; note.textContent = '저장했어요.';
+    } catch (err) { note.textContent = err && err.code === 'invalid_argument' ? '이 계정은 고칠 권한이 없어요.' : '저장하지 못했어요. 다시 눌러 주세요.'; }
+  } },
+    title,
+    el('div', { className: 'props' }, el('label', {}, '상태', statusSel), el('label', {}, safe, '구현해도 됨')),
+    el('section', { className: 'zone' }, el('h3', { textContent: '판단' }), areas[0], areas[1]),
+    el('section', { className: 'zone' }, el('h3', { textContent: '배경' }), el('div', { className: 'two' }, areas[2], areas[3])),
+    el('details', { className: 'zone log', open: logOpen, ontoggle: (e) => { logOpen = e.target.open; } },
+      el('summary', {}, '조사·구현 기록', el('small', { className: 'chip ai', textContent: 'Claude' })), areas[4].lastChild),
+    el('div', { className: 'actions' }, el('button', { type: 'submit', className: 'save', textContent: '저장' }), del, note));
+  $('editor').replaceChildren(form);
+  growAll();
+}
+
+function select(id) {
+  if (id === selected) return;
+  if (dirty) { const n = $('note'); if (n) n.textContent = '저장하지 않은 내용이 있어요. 저장한 뒤 옮겨 주세요.'; return; }
+  selected = id; renderList(); renderEditor();
+  if (matchMedia('(max-width:760px)').matches) $('editor').scrollIntoView();
+}
+
+$('add').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const title = $('newTitle').value.trim();
+  if (!title || !db) return;
+  if (dirty) { const n = $('note'); if (n) n.textContent = '저장하지 않은 내용이 있어요. 저장한 뒤 추가해 주세요.'; return; }
+  try {
+    const ref = db.collection('tickets').doc();
+    await ref.set({ title, status: 'ai', safe: false, why: '', done: '', research: '', decide: '', judgment: '', createdAt: Date.now() });
+    $('newTitle').value = ''; selected = ref.id; renderList(); renderEditor();
+  } catch (err) { $('summary').textContent = '티켓을 추가하지 못했어요. 이 계정의 권한을 확인해 주세요.'; }
+});
+
+renderList(); renderEditor();
+(async () => {
+  db = await claude.use('db');
+  if (!db) { $('summary').textContent = '이 화면에서는 티켓을 불러올 수 없어요. claude.ai 에 로그인한 뒤 열어 주세요.'; return; }
+  const slow = setTimeout(() => { if (!loaded) $('summary').textContent = '티켓을 아직 불러오지 못했어요. 연결을 확인해 주세요.'; }, 10000);
+  db.collection('tickets').onSnapshot((snap) => {
+    tickets = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (!snap.metadata.fromCache) { loaded = true; clearTimeout(slow); }
+    if (!selected && tickets.length) { const first = tickets.find((t) => t.status === 'me') || tickets[0]; selected = first.id; }
+    renderList();
+    if (!dirty) renderEditor();
+  }, () => { clearTimeout(slow); $('summary').textContent = '티켓을 더 이상 불러올 수 없어요. 페이지를 다시 열어 주세요.'; });
+})();
+</script>

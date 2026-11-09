@@ -1,0 +1,4 @@
+interface:
+  display_name: "inqueue"
+  short_description: "Artifact 한 장을 정본으로 쓰는 ai / me / done 티켓 대기열"
+  default_prompt: "$inqueue 를 사용해 이 레포에 티켓 대기열을 만들어 줘"
