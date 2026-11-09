@@ -95,6 +95,9 @@ input[type=checkbox]{accent-color:var(--accent)}
 .save{background:var(--accent);color:var(--on-accent);font-weight:600;border-radius:7px;padding:7px 18px}
 .past summary{cursor:pointer;display:flex;gap:8px;align-items:center;list-style:none;padding:5px 6px;margin-inline:-6px;border-radius:6px}
 .past summary:hover{background:var(--hover)}
+.past summary{user-select:none}
+#groups .past summary{margin-inline:0;padding-inline:10px}
+#groups,.cols > .queue{overflow-x:hidden}
 .past summary::-webkit-details-marker{display:none}
 .past summary::before{content:"";flex:none;width:6px;height:6px;margin-inline:2px 2px;border-right:1.5px solid var(--faint);border-bottom:1.5px solid var(--faint);transform:rotate(-45deg);transition:transform .12s}
 .past[open] summary::before{transform:rotate(45deg)}
@@ -110,6 +113,9 @@ input[type=checkbox]{accent-color:var(--accent)}
 .opts{display:flex;flex-wrap:wrap;gap:6px}
 .opt{padding:5px 12px;border-radius:7px;background:var(--hover);font-size:13px;text-align:left}
 .opt:hover{background:var(--selected)}
+.opt-input{flex:1 1 11rem;min-width:0;font:inherit;font-size:13px;color:inherit;background:none;border:0;border-bottom:1px solid var(--line);padding:5px 4px}
+.opt-input::placeholder{color:var(--faint)}
+.opt-input:focus{outline:none;border-bottom-color:var(--accent)}
 .opt[aria-pressed=true]{background:var(--accent);color:var(--on-accent);font-weight:600}
 .evs{display:grid;gap:8px;padding:2px 0 4px 14px}
 .ev{display:grid;grid-template-columns:minmax(0,1fr);gap:1px;font-size:12.5px;white-space:pre-wrap}
@@ -201,7 +207,7 @@ function mdBlocks(text) {
   return [...root.childNodes];
 }
 
-let db = null, tickets = [], selected = null, dirty = false, loaded = false, logOpen = true;
+let db = null, tickets = [], selected = null, dirty = false, loaded = false, logOpen = false, doneOpen = false;
 
 function row(t) {
   const tags = [t.safe ? 'safe' : null].filter(Boolean).join(' ');
@@ -221,12 +227,15 @@ function renderList() {
   const rest = tickets.filter((t) => !known(t)).sort(newest);
   if (rest.length) groups.push(['기타', rest]);
   const shown = groups.filter(([, list]) => list.length);
-  if (shown.length) box.replaceChildren(...shown.map(([s, list]) => el('div', { className: 'group' }, el('h2', {}, s, el('span', { textContent: String(list.length) })), el('ul', {}, ...list.map(row)))));
+  // done 은 쌓이기만 하니 한 줄로 접어 둔다. 지금 보는 티켓이 그 안에 있으면 펼친다
+  if (shown.length) box.replaceChildren(...shown.map(([s, list]) => s === 'done' ? el('details', { className: 'past', open: doneOpen || list.some((t) => t.id === selected), ontoggle: (e) => { doneOpen = e.target.open; } },
+    el('summary', {}, el('span', { className: 'round', textContent: 'done' }), el('span', { className: 'when', textContent: String(list.length) })),
+    el('ul', {}, ...list.map(row))) : el('div', { className: 'group' }, el('h2', {}, s, el('span', { textContent: String(list.length) })), el('ul', {}, ...list.map(row)))));
   else box.replaceChildren(loaded ? el('p', { className: 'empty', textContent: '티켓이 없어요. 위에 제목을 적어 첫 티켓을 만드세요.' }) : '');
   if (loaded) $('summary').textContent = `내 차례 ${groups[0][1].length}장 · AI 차례 ${groups[1][1].length}장`;
 }
 
-// 지난 판단은 회차마다 한 줄. 최신 회차만 펼쳐 두고, 사람이 여닫은 것은 다시 그려도 유지한다
+// 지난 판단은 회차마다 AI 가 쓴 한 문장 요약으로 접어 둔다. 사람이 여닫은 것은 다시 그려도 유지한다
 const pastOpen = {};
 function pastJudgments(t) {
   const list = Array.isArray(t.history) ? t.history : [];
@@ -234,11 +243,11 @@ function pastJudgments(t) {
   const when = (at) => new Date(at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' });
   const rows = list.map((h, i) => {
     const key = `${t.id}:${i}`;
-    return el('details', { className: 'past', open: pastOpen[key] ?? i === list.length - 1, ontoggle: (e) => { pastOpen[key] = e.target.open; } },
+    return el('details', { className: 'past', open: pastOpen[key] ?? false, ontoggle: (e) => { pastOpen[key] = e.target.open; } },
       el('summary', {},
         el('span', { className: 'round', textContent: `${i + 1}회차` }),
         el('span', { className: 'when', textContent: h.at ? when(h.at) : '' }),
-        el('span', { className: 'gist', textContent: (h.judgment || '').split('\n').join(' · ') })),
+        el('span', { className: 'gist', textContent: h.summary || (h.judgment || '').split('\n').join(' · ') })),
       el('div', { className: 'past-body' },
         h.decide ? el('div', { className: 'ai-text' }, ...mdBlocks(h.decide)) : null,
         el('div', { className: 'answer' }, el('small', { className: 'chip', textContent: '나' }), el('span', { textContent: h.judgment || '' }))));
@@ -269,12 +278,25 @@ function questionCards(t, qs, onPick) {
     const btns = opts.map((o) => {
       const b = el('button', { type: 'button', className: 'opt', textContent: (o.recommended ? '★ ' : '') + o.label, onclick: () => {
         (picked[t.id] = picked[t.id] || {})[q.q] = o.label;
+        other.value = '';
         btns.forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
         onPick();
       } });
       b.setAttribute('aria-pressed', String(pickOf(t, q) === o.label));
       return b;
     });
+    // 선택지에 없는 답은 직접 적는다. 적으면 버튼 선택이 풀린다
+    const cur = pickOf(t, q);
+    const other = el('input', { type: 'text', className: 'opt-input', placeholder: '직접 적기', value: cur && !opts.some((o) => o.label === cur) ? cur : '',
+      onkeydown: (e) => { if (e.key === 'Enter') e.preventDefault(); },
+      oninput: (e) => {
+        e.stopPropagation();
+        const mine = (picked[t.id] = picked[t.id] || {});
+        if (e.target.value.trim()) mine[q.q] = e.target.value.trim(); else delete mine[q.q];
+        btns.forEach((x) => x.setAttribute('aria-pressed', 'false'));
+        onPick();
+      } });
+    other.setAttribute('aria-label', '직접 적기');
     const ev = Array.isArray(q.evidence) ? q.evidence.filter((e) => e && (e.source || e.quote)) : [];
     const key = `${t.id}:q:${q.q}`;
     const proof = ev.length
@@ -285,7 +307,7 @@ function questionCards(t, qs, onPick) {
     return el('div', { className: 'q' },
       el('div', { className: 'q-head' }, el('span', { className: 'q-n', textContent: String(i + 1) }), el('div', { className: 'ai-text plain' }, ...mdBlocks(q.q))),
       rec ? el('p', { className: 'rec' }, '추천: ', el('b', { textContent: rec.label }), q.why ? ` — ${q.why}` : '') : null,
-      el('div', { className: 'opts' }, ...btns),
+      el('div', { className: 'opts' }, ...btns, other),
       proof);
   }));
 }
@@ -321,7 +343,7 @@ function renderEditor() {
   // 상태는 고르지 않고 버튼으로 넘긴다. 버튼은 지금 칸 저장과 상태 변경을 한 번에 한다
   const act = (label, next, cls = 'act') => el('button', { type: 'submit', className: cls, textContent: label, value: next });
   const buttons = t.status === 'me' ? [act('AI에게 넘기기', 'ai', 'save'), act('저장', '', 'act'), act('완료', 'done')]
-    : t.status === 'done' ? [act('다시 열기', 'ai', 'save')]
+    : t.status === 'done' ? [act('다시 열기', 'me', 'save')]
     : [act('저장', '', 'save'), act('완료', 'done')];
   const safe = el('input', { type: 'checkbox', id: 'f-safe', checked: !!t.safe });
   const title = el('textarea', { id: 'f-title', value: t.title || '', rows: 1, maxLength: 200, placeholder: '제목 없음', onkeydown: (e) => { if (e.key === 'Enter') e.preventDefault(); } });
