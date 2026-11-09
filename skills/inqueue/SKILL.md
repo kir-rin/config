@@ -29,7 +29,7 @@ description: "레포마다 Claude Artifact 한 장을 정본으로 쓰는 티켓
 2. 폰트를 받는다(레포에 2MB 를 넣지 않으려고 스킬에 두지 않았다). 받은 파일은 빈 폴더 하나에 둔다.
    `curl -fsSL -o <폴더>/PretendardVariable.woff2 https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/woff2/PretendardVariable.woff2`
 3. 발행한다: `Artifact` 에 `file_path`, `icon: "list"`, `capabilities: {"db": {}}`, `files: {"PretendardVariable.woff2": "<폴더>/PretendardVariable.woff2"}`.
-4. `ArtifactData` 로 `tickets` 컬렉션에 예시 티켓 하나를 넣는다. 예시임을 적고, 업무 내용은 넣지 않는다. 칸: `title`, `status`, `safe`, `why`, `done`, `research`, `decide`, `judgment`, `createdAt`.
+4. `ArtifactData` 로 `tickets` 컬렉션에 예시 티켓 하나를 넣는다. 예시임을 적고, 업무 내용은 넣지 않는다. 칸: `title`, `status`, `safe`, `why`, `done`, `research`, `decide`, `judgment`, `questions`, `createdAt`.
 5. `ArtifactData list` 로 읽어 들어갔는지 본다.
 
 수정 전에는 `references/design.md` 를 읽는다. 사용자가 지적해 맞춘 기준이다.

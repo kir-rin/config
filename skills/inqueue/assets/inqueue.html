@@ -18,9 +18,12 @@
 body{background:var(--bg);color:var(--fg);font:13.5px/1.65 var(--sans);letter-spacing:-.01em;word-break:keep-all;overflow-wrap:anywhere;-webkit-font-smoothing:antialiased;
   padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:32px 64px}
 .cols{max-width:76rem;margin:0 auto;display:grid;grid-template-columns:minmax(0,19rem) minmax(0,1fr);gap:24px;align-items:start}
-@media (max-width:760px){.cols{grid-template-columns:minmax(0,1fr);gap:40px}}
+@media (max-width:860px){.cols{grid-template-columns:minmax(0,1fr);gap:24px}#groups{max-height:34svh;overflow-y:auto}}
+/* 격자 칸이 긴 한 줄 글 때문에 화면보다 넓어지지 않게 한다 */
+.group,.editor form,.zone,.field,.past-body,#groups,ul{grid-template-columns:minmax(0,1fr)}
+.past,.past summary,.ai-text{min-width:0}
 .queue{display:grid;gap:20px;min-width:0}
-@media (min-width:761px){.queue{position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px);max-height:calc(100dvh - 24px);overflow-y:auto}}
+@media (min-width:861px){.cols > .queue{position:sticky;top:calc(env(safe-area-inset-top,0px) + 12px);max-height:calc(100dvh - 24px);overflow-y:auto}}
 h1{font-size:14px;font-weight:700;margin:0}
 .sub{margin:0;color:var(--sub);font-size:12px}
 .add input{font:inherit;color:inherit;width:100%;background:var(--hover);border:0;border-radius:8px;padding:8px 12px}
@@ -40,12 +43,12 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .tags{font-size:11px;color:var(--faint);white-space:nowrap}
 .tags .busy{color:var(--accent);font-weight:600}
 .empty{color:var(--sub);margin:0;font-size:14px;padding:0 10px}
-.editor{min-width:0;max-width:46rem}
+.editor{min-width:0;max-width:46rem;container-type:inline-size}
 .editor form{display:grid;gap:22px}
 .zone{display:grid;gap:14px;border-top:1px solid var(--line);padding-top:16px}
 .zone h3,.log summary{font-size:14px;font-weight:700;margin:0}
 .two{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
-@media (max-width:560px){.two{grid-template-columns:minmax(0,1fr)}}
+@container (max-width:560px){.two{grid-template-columns:minmax(0,1fr)}}
 .log summary{cursor:pointer;display:flex;gap:6px;align-items:center;list-style:none}
 .log summary::-webkit-details-marker{display:none}
 .log summary::before{content:"";width:6px;height:6px;margin-inline:2px 4px;border-right:1.5px solid var(--faint);border-bottom:1.5px solid var(--faint);transform:rotate(-45deg);transition:transform .12s}
@@ -90,8 +93,33 @@ input[type=checkbox]{accent-color:var(--accent)}
 .ai-text.none{color:var(--faint);background:none;padding:4px 0}
 .actions{display:flex;flex-wrap:wrap;gap:14px;align-items:center;position:sticky;bottom:env(safe-area-inset-bottom,0px);background:var(--bg);padding-block:12px}
 .save{background:var(--accent);color:var(--on-accent);font-weight:600;border-radius:7px;padding:7px 18px}
-.past{display:grid;gap:6px;margin-top:10px}
-.when{font-size:11.5px;color:var(--faint)}
+.past summary{cursor:pointer;display:flex;gap:8px;align-items:center;list-style:none;padding:5px 6px;margin-inline:-6px;border-radius:6px}
+.past summary:hover{background:var(--hover)}
+.past summary::-webkit-details-marker{display:none}
+.past summary::before{content:"";flex:none;width:6px;height:6px;margin-inline:2px 2px;border-right:1.5px solid var(--faint);border-bottom:1.5px solid var(--faint);transform:rotate(-45deg);transition:transform .12s}
+.past[open] summary::before{transform:rotate(45deg)}
+@media (prefers-reduced-motion:reduce){.past summary::before{transition:none}}
+.fresh{position:sticky;top:env(safe-area-inset-top,0px);z-index:2;width:100%;margin-bottom:14px;padding:8px 12px;border-radius:8px;font-size:13px;font-weight:600;text-align:left;color:var(--accent);background:color-mix(in srgb,var(--accent) 14%,var(--bg))}
+.qs{display:grid;grid-template-columns:minmax(0,1fr);gap:20px}
+.q{display:grid;grid-template-columns:minmax(0,1fr);gap:8px}
+.q-head{display:flex;gap:8px;align-items:baseline}
+.q-n{flex:none;font-weight:700;color:var(--accent)}
+.ai-text.plain{flex:1;background:none;padding:0;margin:0;font-weight:600}
+.rec{margin:0;color:var(--sub);font-size:12.5px}
+.rec b{color:var(--fg);font-weight:600}
+.opts{display:flex;flex-wrap:wrap;gap:6px}
+.opt{padding:5px 12px;border-radius:7px;background:var(--hover);font-size:13px;text-align:left}
+.opt:hover{background:var(--selected)}
+.opt[aria-pressed=true]{background:var(--accent);color:var(--on-accent);font-weight:600}
+.evs{display:grid;gap:8px;padding:2px 0 4px 14px}
+.ev{display:grid;grid-template-columns:minmax(0,1fr);gap:1px;font-size:12.5px;white-space:pre-wrap}
+.ev code{font:.84em ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--sub);letter-spacing:0}
+.noev{margin:0;font-size:12px;color:var(--danger)}
+.save:disabled{opacity:.4;cursor:default}
+.round{font-size:12px;font-weight:600;white-space:nowrap}
+.gist{flex:1;min-width:0;color:var(--sub);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.past-body{display:grid;gap:8px;padding:4px 0 12px 14px}
+.when{font-size:11.5px;font-weight:400;color:var(--faint);white-space:nowrap}
 .answer{display:flex;gap:8px;align-items:baseline;white-space:pre-wrap;padding-left:2px}
 .answer span{min-width:0}
 .act{color:var(--sub);font-weight:500;border-radius:7px;padding:7px 10px}
@@ -151,6 +179,11 @@ function plainMd(s, out) {
   }
   if (i < s.length) out.push(s.slice(i));
 }
+// 물결표 하나(~78장)는 취소선이 아니다. ~~두 개~~ 만 취소선으로 본다
+if (window.marked) marked.use({ tokenizer: { del(src) {
+  const m = /^~~(?=\S)([\s\S]*?\S)~~/.exec(src);
+  return m ? { type: 'del', raw: m[0], text: m[1], tokens: this.lexer.inlineTokens(m[1]) } : undefined;
+} } });
 function mdBlocks(text) {
   if (!window.marked || !window.DOMPurify) return [el('p', { textContent: text, style: 'white-space:pre-wrap' })];
   // 「A. 내용」 선택지는 글자를 굵게 해 눈에 띄게 한다
@@ -193,19 +226,96 @@ function renderList() {
   if (loaded) $('summary').textContent = `내 차례 ${groups[0][1].length}장 · AI 차례 ${groups[1][1].length}장`;
 }
 
+// 지난 판단은 회차마다 한 줄. 최신 회차만 펼쳐 두고, 사람이 여닫은 것은 다시 그려도 유지한다
+const pastOpen = {};
 function pastJudgments(t) {
   const list = Array.isArray(t.history) ? t.history : [];
   if (!list.length) return null;
   const when = (at) => new Date(at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' });
-  return el('div', { className: 'field' }, el('span', {}, '지난 판단'),
-    ...list.map((h) => el('div', { className: 'past' },
-      el('div', { className: 'when', textContent: h.at ? when(h.at) : '' }),
-      h.decide ? el('div', { className: 'ai-text' }, ...mdBlocks(h.decide)) : null,
-      el('div', { className: 'answer' }, el('small', { className: 'chip', textContent: '나' }), el('span', { textContent: h.judgment || '' })))));
+  const rows = list.map((h, i) => {
+    const key = `${t.id}:${i}`;
+    return el('details', { className: 'past', open: pastOpen[key] ?? i === list.length - 1, ontoggle: (e) => { pastOpen[key] = e.target.open; } },
+      el('summary', {},
+        el('span', { className: 'round', textContent: `${i + 1}회차` }),
+        el('span', { className: 'when', textContent: h.at ? when(h.at) : '' }),
+        el('span', { className: 'gist', textContent: (h.judgment || '').split('\n').join(' · ') })),
+      el('div', { className: 'past-body' },
+        h.decide ? el('div', { className: 'ai-text' }, ...mdBlocks(h.decide)) : null,
+        el('div', { className: 'answer' }, el('small', { className: 'chip', textContent: '나' }), el('span', { textContent: h.judgment || '' }))));
+  }).reverse();
+  return el('section', { className: 'zone' }, el('h3', {}, '지난 판단 ', el('span', { className: 'when', textContent: String(list.length) })), el('div', {}, ...rows));
+}
+
+const VIEW = ['title', 'status', 'safe', 'why', 'done', 'research', 'decide', 'judgment', 'history', 'questions'];
+// 질문 카드: 질문·추천·선택지·근거를 한자리에. 고른 답은 넘길 때까지 이 화면의 메모리에만 둔다
+const picked = {};
+// 저장 전 글과 고른 답은 이 브라우저에 임시로 둔다. 페이지를 다시 불러와도 되살린다
+const DRAFT_KEYS = ['title', 'judgment', 'why', 'done'];
+const draftOf = (id) => { try { return JSON.parse(localStorage.getItem(`draft:${id}`)) || {}; } catch (e) { return {}; } };
+const putDraft = (id, d) => {
+  try {
+    if (Object.keys(d.fields || {}).length || Object.keys(d.picks || {}).length) localStorage.setItem(`draft:${id}`, JSON.stringify(d));
+    else localStorage.removeItem(`draft:${id}`);
+  } catch (e) { /* 임시 저장을 못 해도 페이지는 그대로 쓴다 */ }
+};
+const questionsOf = (t) => (Array.isArray(t.questions) ? t.questions.filter((q) => q && q.q) : []);
+const pickOf = (t, q) => (picked[t.id] || {})[q.q];
+const composeAnswer = (t, note) => questionsOf(t).map((q, i) => `${i + 1}. ${q.q}\n→ ${pickOf(t, q) || '(답 안 함)'}`).join('\n') + (note.trim() ? `\n\n${note.trim()}` : '');
+const questionsText = (qs) => qs.map((q, i) => `${i + 1}. ${q.q}${(Array.isArray(q.evidence) ? q.evidence : []).map((e) => `\n   - ${e.source || ''}: ${e.quote || ''}`).join('')}`).join('\n');
+function questionCards(t, qs, onPick) {
+  return el('div', { className: 'qs' }, ...qs.map((q, i) => {
+    const opts = Array.isArray(q.options) ? q.options : [];
+    const rec = opts.find((o) => o.recommended);
+    const btns = opts.map((o) => {
+      const b = el('button', { type: 'button', className: 'opt', textContent: (o.recommended ? '★ ' : '') + o.label, onclick: () => {
+        (picked[t.id] = picked[t.id] || {})[q.q] = o.label;
+        btns.forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+        onPick();
+      } });
+      b.setAttribute('aria-pressed', String(pickOf(t, q) === o.label));
+      return b;
+    });
+    const ev = Array.isArray(q.evidence) ? q.evidence.filter((e) => e && (e.source || e.quote)) : [];
+    const key = `${t.id}:q:${q.q}`;
+    const proof = ev.length
+      ? el('details', { className: 'past', open: pastOpen[key] ?? i === 0, ontoggle: (e) => { pastOpen[key] = e.target.open; } },
+        el('summary', {}, el('span', { className: 'round', textContent: `근거 ${ev.length}` })),
+        el('div', { className: 'evs' }, ...ev.map((e) => el('div', { className: 'ev' }, e.source ? el('code', { textContent: e.source }) : null, e.quote ? el('span', { textContent: e.quote }) : null))))
+      : el('p', { className: 'noev', textContent: '근거 없음' });
+    return el('div', { className: 'q' },
+      el('div', { className: 'q-head' }, el('span', { className: 'q-n', textContent: String(i + 1) }), el('div', { className: 'ai-text plain' }, ...mdBlocks(q.q))),
+      rec ? el('p', { className: 'rec' }, '추천: ', el('b', { textContent: rec.label }), q.why ? ` — ${q.why}` : '') : null,
+      el('div', { className: 'opts' }, ...btns),
+      proof);
+  }));
+}
+const keyOf = (t) => (t ? JSON.stringify(VIEW.map((k) => t[k] ?? null)) : '');
+let shownKey = '', selfWrite = false;
+function showFresh() {
+  if ($('fresh')) return;
+  $('editor').prepend(el('button', { type: 'button', id: 'fresh', className: 'fresh', textContent: '이 티켓에 새 내용이 있어요. 눌러서 불러오기', onclick: () => {
+    if (dirty) { const n = $('note'); if (n) n.textContent = '저장한 뒤 불러올 수 있어요.'; return; }
+    renderEditor();
+  } }));
+}
+
+// 조사 기록은 「### n회차」 묶음. 위가 최신이고 최신만 펼친다. 묶음이 하나면 그냥 글로 보인다
+function researchBlocks(t, plain) {
+  const parts = (t.research || '').split(/^(?=### )/m).filter((p) => p.trim());
+  if (parts.length < 2) return plain;
+  return el('div', {}, ...parts.map((p, i) => {
+    const m = /^### (.*)\n?([\s\S]*)$/.exec(p);
+    const title = m ? m[1] : '이전 기록', body = m ? m[2] : p;
+    const key = `${t.id}:r:${title}`;
+    return el('details', { className: 'past', open: pastOpen[key] ?? i === 0, ontoggle: (e) => { pastOpen[key] = e.target.open; } },
+      el('summary', {}, el('span', { className: 'gist', textContent: title })),
+      el('div', { className: 'past-body' }, el('div', { className: 'ai-text' }, ...mdBlocks(body))));
+  }));
 }
 
 function renderEditor() {
   const t = tickets.find((x) => x.id === selected);
+  shownKey = keyOf(t);
   if (!t) { $('editor').replaceChildren(el('p', { className: 'empty', textContent: '왼쪽에서 티켓을 고르면 여기에 열려요.' })); return; }
   const note = el('span', { className: 'note', id: 'note' });
   // 상태는 고르지 않고 버튼으로 넘긴다. 버튼은 지금 칸 저장과 상태 변경을 한 번에 한다
@@ -222,13 +332,34 @@ function renderEditor() {
     if (who === 'Claude') return el('div', { className: 'field' }, head, t[k] ? el('div', { className: 'ai-text' }, ...mdBlocks(t[k])) : el('div', { className: 'ai-text none', textContent: '아직 없음' }));
     return el('label', { className: 'field' }, head, el('textarea', { id: `f-${k}`, value: t[k] || '', rows: 1, placeholder: '비어 있음' }));
   });
+  // 질문이 있으면 전부 답하거나 덧붙일 말을 적어야 넘길 수 있다
+  picked[t.id] = picked[t.id] || draftOf(t.id).picks || {};
+  const saveDraft = () => {
+    const fields = {};
+    for (const k of DRAFT_KEYS) { const a = $(`f-${k}`); if (a && a.value !== (t[k] ?? '')) fields[k] = a.value; }
+    putDraft(t.id, { fields, picks: picked[t.id] || {} });
+  };
+  const qs = questionsOf(t);
+  const progress =qs.length ? el('span', { className: 'when' }) : null;
+  const note2 = () => $('f-judgment');
+  const syncGo = () => {
+    if (!qs.length) return;
+    const done = qs.filter((q) => pickOf(t, q)).length;
+    progress.textContent = `${qs.length}개 중 ${done}개 답함`;
+    if (t.status === 'me') buttons[0].disabled = done < qs.length && !(note2() && note2().value.trim());
+  };
+  const cards = qs.length ? questionCards(t, qs, () => { syncGo(); saveDraft(); }) : null;
+  if (qs.length) {
+    areas[1].firstChild.firstChild.nodeValue = '덧붙일 말';
+    areas[1].lastChild.placeholder = '다르게 하고 싶거나 더 말할 것이 있으면 적어 주세요';
+  }
   let armed = false;
   const del = el('button', { type: 'button', className: 'del', textContent: '삭제', onclick: async () => {
     if (!armed) { armed = true; del.textContent = '한 번 더 누르면 삭제돼요'; return; }
     try { await db.collection('tickets').doc(t.id).delete(); dirty = false; selected = null; renderEditor(); }
     catch (e) { note.textContent = '삭제하지 못했어요. 다시 눌러 주세요.'; }
   } });
-  const form = el('form', { oninput: (e) => { dirty = true; note.textContent = '저장 전이에요.'; if (e.target.tagName === 'TEXTAREA') grow(e.target); }, onsubmit: async (e) => {
+  const form = el('form', { oninput: (e) => { dirty = true; note.textContent = '저장 전이에요.'; if (e.target.tagName === 'TEXTAREA') grow(e.target); syncGo(); saveDraft(); }, onsubmit: async (e) => {
     e.preventDefault();
     // 바뀐 칸만 쓴다 — 페이지를 열어 둔 사이 AI 가 적은 다른 칸을 덮지 않게
     const values = { title: title.value.trim(), status: (e.submitter && e.submitter.value) || t.status, safe: safe.checked };
@@ -236,32 +367,47 @@ function renderEditor() {
     const body = {};
     for (const k of Object.keys(values)) if (values[k] !== (t[k] ?? (k === 'safe' ? false : ''))) body[k] = values[k];
     // 넘길 때 질문과 답을 한 쌍으로 쌓고 두 칸을 비운다 — 옛 판단이 새 판단으로 읽히지 않게
-    if (values.status === 'ai' && t.status !== 'ai' && values.judgment.trim()) {
-      body.history = [...(Array.isArray(t.history) ? t.history : []), { decide: t.decide || '', judgment: values.judgment, at: Date.now() }];
+    const answer = qs.length ? composeAnswer(t, values.judgment) : values.judgment;
+    if (values.status === 'ai' && t.status !== 'ai' && answer.trim()) {
+      const asked = [t.decide || '', questionsText(qs)].filter(Boolean).join('\n\n');
+      body.history = [...(Array.isArray(t.history) ? t.history : []), { decide: asked, judgment: answer, at: Date.now() }];
       body.decide = '';
       body.judgment = '';
+      body.questions = [];
+      delete picked[t.id];
     }
     try {
-      if (Object.keys(body).length) await db.collection('tickets').doc(t.id).update(body);
-      dirty = false; note.textContent = '저장했어요.';
-    } catch (err) { note.textContent = err && err.code === 'invalid_argument' ? '이 계정은 고칠 권한이 없어요.' : '저장하지 못했어요. 다시 눌러 주세요.'; }
+      const changed = Object.keys(body).length > 0;
+      dirty = false; selfWrite = changed;
+      putDraft(t.id, { fields: {}, picks: picked[t.id] || {} });   // 다시 그릴 때 옛 글이 되살아나지 않게 먼저 비운다
+      if (changed) await db.collection('tickets').doc(t.id).update(body);
+      const n = $('note'); if (n) n.textContent = '저장했어요.';
+    } catch (err) { dirty = true; selfWrite = false; saveDraft(); note.textContent = err &&err.code === 'invalid_argument' ? '이 계정은 고칠 권한이 없어요.' : '저장하지 못했어요. 다시 눌러 주세요.'; }
   } },
     title,
     el('div', { className: 'props' }, el('span', {}, '상태 ', el('b', { textContent: t.status })), el('label', {}, safe, '구현해도 됨')),
-    el('section', { className: 'zone' }, el('h3', { textContent: '판단' }), areas[0], areas[1], pastJudgments(t)),
+    el('section', { className: 'zone' }, el('h3', {}, '판단 ', progress), qs.length && !t.decide ? null : areas[0], cards, areas[1]),
+    pastJudgments(t),
     el('section', { className: 'zone' }, el('h3', { textContent: '배경' }), el('div', { className: 'two' }, areas[2], areas[3])),
     el('details', { className: 'zone log', open: logOpen, ontoggle: (e) => { logOpen = e.target.open; } },
-      el('summary', {}, '조사·구현 기록', el('small', { className: 'chip ai', textContent: 'Claude' })), areas[4].lastChild),
+      el('summary', {}, '조사·구현 기록', el('small', { className: 'chip ai', textContent: 'Claude' })), researchBlocks(t, areas[4].lastChild)),
     el('div', { className: 'actions' }, ...buttons, del, note));
   $('editor').replaceChildren(form);
+  let restored = false;
+  for (const [k, v] of Object.entries(draftOf(t.id).fields || {})) {
+    const a = $(`f-${k}`);
+    if (a && v !== (t[k] ?? '')) { a.value = v; restored = true; }
+  }
+  if (restored) { dirty = true; note.textContent = '저장 안 한 글을 되살렸어요.'; }
   growAll();
+  syncGo();
 }
 
 function select(id) {
   if (id === selected) return;
   if (dirty) { const n = $('note'); if (n) n.textContent = '저장하지 않은 내용이 있어요. 저장한 뒤 옮겨 주세요.'; return; }
   selected = id; renderList(); renderEditor();
-  if (matchMedia('(max-width:760px)').matches) $('editor').scrollIntoView();
+  if (matchMedia('(max-width:860px)').matches) $('editor').scrollIntoView();
 }
 
 $('add').addEventListener('submit', async (e) => {
@@ -286,7 +432,10 @@ renderList(); renderEditor();
     if (!snap.metadata.fromCache) { loaded = true; clearTimeout(slow); }
     if (!selected && tickets.length) { const first = tickets.find((t) => t.status === 'me') || tickets[0]; selected = first.id; }
     renderList();
-    if (!dirty) renderEditor();
+    // 보고 있는 티켓을 멋대로 다시 그리지 않는다. 내가 저장했을 때만 다시 그리고, 다른 쪽이 바꿨으면 띠로 알린다
+    const cur = tickets.find((x) => x.id === selected);
+    if (!cur || selfWrite || !shownKey) { selfWrite = false; if (!dirty) renderEditor(); }
+    else if (keyOf(cur) !== shownKey) showFresh();
   }, () => { clearTimeout(slow); $('summary').textContent = '티켓을 더 이상 불러올 수 없어요. 페이지를 다시 열어 주세요.'; });
 })();
 </script>
