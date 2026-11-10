@@ -57,6 +57,11 @@ button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
 .log[open] summary{margin-bottom:10px}
 #f-judgment{background:var(--hover);min-height:4.8em;padding:10px 12px;margin-left:0;border-radius:8px}
 #f-judgment:focus{box-shadow:inset 0 0 0 1.5px var(--accent)}
+#f-judgment{min-height:2.6em;max-height:40svh;overflow-y:auto}
+.composer{position:sticky;bottom:env(safe-area-inset-bottom,0px);z-index:2;display:grid;grid-template-columns:minmax(0,1fr);gap:8px;background:var(--bg);padding-block:10px;border-top:1px solid var(--line)}
+.composer .actions{position:static;padding-block:0;background:none}
+.status-line.ai-text.plain{font-weight:400;font-size:12.5px;color:var(--sub);margin-top:-12px}
+.status-line p{margin:0}
 textarea{font:inherit;color:inherit;letter-spacing:inherit;width:100%;display:block;background:none;border:0;border-radius:6px;padding:4px 8px;margin-left:-8px;resize:none;overflow:hidden}
 textarea:hover{background:var(--hover)}
 textarea:focus{background:var(--hover);outline:none}
@@ -113,9 +118,15 @@ input[type=checkbox]{accent-color:var(--accent)}
 .opts{display:flex;flex-wrap:wrap;gap:6px}
 .opt{padding:5px 12px;border-radius:7px;background:var(--hover);font-size:13px;text-align:left}
 .opt:hover{background:var(--selected)}
-.opt-input{flex:1 1 11rem;min-width:0;font:inherit;font-size:13px;color:inherit;background:none;border:0;border-bottom:1px solid var(--line);padding:5px 4px}
+.opt-input{flex:1 1 100%;min-width:0;font:inherit;font-size:13px;color:inherit;background:var(--hover);border:0;border-radius:7px;padding:8px 12px;margin-left:0}
 .opt-input::placeholder{color:var(--faint)}
-.opt-input:focus{outline:none;border-bottom-color:var(--accent)}
+.thumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.thumb{position:relative;display:inline-block;max-width:100%}
+.thumb img{display:block;height:72px;max-width:100%;border-radius:6px;cursor:zoom-in;object-fit:cover}
+.thumb img.big{height:auto;cursor:zoom-out}
+.thumb-x{position:absolute;top:2px;right:2px;width:20px;height:20px;line-height:18px;padding:0;border-radius:50%;background:var(--bg);color:var(--sub);font-size:13px}
+.img-hint{font-size:11.5px;color:var(--faint);margin-top:2px}
+.opt-input:focus{outline:none;box-shadow:inset 0 0 0 1.5px var(--accent)}
 .opt[aria-pressed=true]{background:var(--accent);color:var(--on-accent);font-weight:600}
 .evs{display:grid;gap:8px;padding:2px 0 4px 14px}
 .ev{display:grid;grid-template-columns:minmax(0,1fr);gap:1px;font-size:12.5px;white-space:pre-wrap}
@@ -128,9 +139,14 @@ input[type=checkbox]{accent-color:var(--accent)}
 .when{font-size:11.5px;font-weight:400;color:var(--faint);white-space:nowrap}
 .answer{display:flex;gap:8px;align-items:baseline;white-space:pre-wrap;padding-left:2px}
 .answer span{min-width:0}
+kbd{font:inherit;font-size:11px;font-weight:400;opacity:.65;margin-left:6px}
+.keys{color:var(--faint);font-size:11.5px}
 .act{color:var(--sub);font-weight:500;border-radius:7px;padding:7px 10px}
 .act:hover{background:var(--hover)}
 .del{color:var(--faint);font-size:13px}
+.snooze{display:inline-flex;flex-wrap:wrap;gap:10px;align-items:center;color:var(--faint);font-size:13px}
+.snooze button{color:var(--sub);font-size:13px}
+.snooze button:hover{color:var(--fg);text-decoration:underline}
 .del:hover{color:var(--danger)}
 .note{color:var(--sub);font-size:13px}
 </style>
@@ -140,6 +156,7 @@ input[type=checkbox]{accent-color:var(--accent)}
     <header>
       <h1>__INQUEUE_TITLE__</h1>
       <p class="sub" id="summary">티켓을 불러오는 중이에요.</p>
+      <p class="sub keys">⌥↑↓ 티켓 이동</p>
     </header>
     <form class="add" id="add">
       <input type="text" id="newTitle" placeholder="새 티켓 제목을 쓰고 Enter" aria-label="새 티켓 제목" maxlength="200">
@@ -169,7 +186,11 @@ if (document.fonts) document.fonts.ready.then(growAll);
 
 const $ = (id) => document.getElementById(id);
 const el = (tag, props = {}, ...kids) => { const n = Object.assign(document.createElement(tag), props); n.append(...kids.filter((k) => k !== null)); return n; };
-const busy = (t) => t.status === 'ai' && t.claimedAt > Date.now() - 3600000;
+const waits = (t) => (t.status === 'ai' && Array.isArray(t.waiting)) ? t.waiting.filter((w) => w && w.what) : [];
+const busy = (t) => t.status === 'ai' && (t.claimedAt > Date.now() - 3600000 || waits(t).length > 0);
+// 미룬 티켓: 내 차례인데 깨울 시각이 아직 안 됐다. 시각이 지나면 저절로 내 차례로 돌아온다
+const snoozed = (t) => t.status === 'me' && t.snoozeUntil > Date.now();
+const wakeText = (ms) => { const d = new Date(ms), now = new Date(); const hm = d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }); return d.toDateString() === now.toDateString() ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`; };
 
 // Claude 칸의 마크다운(문단·목록·`코드`·**굵게**·코드 울타리). 글은 textContent 로만 넣는다
 // 백틱 없이 적힌 경로·파일:줄도 코드로 보인다. 「ai/me」 같은 낱말은 경로로 치지 않는다
@@ -207,14 +228,14 @@ function mdBlocks(text) {
   return [...root.childNodes];
 }
 
-let db = null, tickets = [], selected = null, dirty = false, loaded = false, logOpen = false, doneOpen = false;
+let db = null, tickets = [], selected = null, dirty = false, loaded = false, logOpen = false, doneOpen = false, laterOpen = false, assets = null, focusNext = '', pasteHandler = null;
 
 function row(t) {
   const tags = [t.safe ? 'safe' : null].filter(Boolean).join(' ');
   const b = el('button', { type: 'button', className: 'row', onclick: () => select(t.id) },
     el('span', { className: `dot ${t.status}` }),
     el('span', { textContent: t.title || '(제목 없음)' }),
-    el('span', { className: 'tags' }, busy(t) ? el('span', { className: 'busy', textContent: '작업 중 ' }) : null, tags));
+    el('span', { className: 'tags' }, busy(t) ? el('span', { className: 'busy', textContent: waits(t).length ? `백그라운드${waits(t)[0].eta ? ' · ' + wakeText(waits(t)[0].eta) + ' 끝 예상' : ''} ` : '작업 중 ' }) : null, snoozed(t) ? `${wakeText(t.snoozeUntil)}에 ` : null, tags));
   b.setAttribute('aria-current', String(t.id === selected));
   return el('li', {}, b);
 }
@@ -223,19 +244,27 @@ function renderList() {
   const newest = (a, b) => (b.createdAt || 0) - (a.createdAt || 0);
   const box = $('groups');
   const known = (t) => STATUSES.includes(t.status);
-  const groups = GROUPS.map((s) => [s, tickets.filter((t) => t.status === s).sort(newest)]);
+  const groups = GROUPS.map((s) => [s, tickets.filter((t) => t.status === s && !snoozed(t)).sort(newest)]);
+  const later = tickets.filter(snoozed).sort((a, b) => a.snoozeUntil - b.snoozeUntil);
+  if (later.length) groups.splice(2, 0, ['미룸', later]);
   const rest = tickets.filter((t) => !known(t)).sort(newest);
   if (rest.length) groups.push(['기타', rest]);
   const shown = groups.filter(([, list]) => list.length);
   // done 은 쌓이기만 하니 한 줄로 접어 둔다. 지금 보는 티켓이 그 안에 있으면 펼친다
-  if (shown.length) box.replaceChildren(...shown.map(([s, list]) => s === 'done' ? el('details', { className: 'past', open: doneOpen || list.some((t) => t.id === selected), ontoggle: (e) => { doneOpen = e.target.open; } },
-    el('summary', {}, el('span', { className: 'round', textContent: 'done' }), el('span', { className: 'when', textContent: String(list.length) })),
+  if (shown.length) box.replaceChildren(...shown.map(([s, list]) => s === 'done' || s === '미룸' ? el('details', { className: 'past', open: (s === 'done' ? doneOpen : laterOpen) || list.some((t) => t.id === selected), ontoggle: (e) => { if (s === 'done') doneOpen = e.target.open; else laterOpen = e.target.open; } },
+    el('summary', {}, el('span', { className: 'round', textContent: s }), el('span', { className: 'when', textContent: String(list.length) })),
     el('ul', {}, ...list.map(row))) : el('div', { className: 'group' }, el('h2', {}, s, el('span', { textContent: String(list.length) })), el('ul', {}, ...list.map(row)))));
   else box.replaceChildren(loaded ? el('p', { className: 'empty', textContent: '티켓이 없어요. 위에 제목을 적어 첫 티켓을 만드세요.' }) : '');
   if (loaded) $('summary').textContent = `내 차례 ${groups[0][1].length}장 · AI 차례 ${groups[1][1].length}장`;
 }
 
 // 지난 판단은 회차마다 AI 가 쓴 한 문장 요약으로 접어 둔다. 사람이 여닫은 것은 다시 그려도 유지한다
+function thumbs(list, onRemove) {
+  return el('div', { className: 'thumbs' }, ...list.map((im) => {
+    const img = el('img', { src: `/_blob/${im.id}`, alt: '붙여 넣은 이미지', onclick: (e) => { e.preventDefault(); img.classList.toggle('big'); } });
+    return el('span', { className: 'thumb' }, img, onRemove ? el('button', { type: 'button', className: 'thumb-x', textContent: '×', onclick: (e) => { e.preventDefault(); onRemove(im); } }) : null);
+  }));
+}
 const pastOpen = {};
 function pastJudgments(t) {
   const list = Array.isArray(t.history) ? t.history : [];
@@ -250,12 +279,13 @@ function pastJudgments(t) {
         el('span', { className: 'gist', textContent: h.summary || (h.judgment || '').split('\n').join(' · ') })),
       el('div', { className: 'past-body' },
         h.decide ? el('div', { className: 'ai-text' }, ...mdBlocks(h.decide)) : null,
-        el('div', { className: 'answer' }, el('small', { className: 'chip', textContent: '나' }), el('span', { textContent: h.judgment || '' }))));
+        el('div', { className: 'answer' }, el('small', { className: 'chip', textContent: '나' }), el('span', { textContent: h.judgment || '' })), Array.isArray(h.images) && h.images.length ? thumbs(h.images) : null,
+        h.reply ? el('div', { className: 'field' }, el('span', {}, 'AI의 답', el('small', { className: 'chip ai', textContent: 'Claude' })), el('div', { className: 'ai-text' }, ...mdBlocks(h.reply))) : null));
   }).reverse();
   return el('section', { className: 'zone' }, el('h3', {}, '지난 판단 ', el('span', { className: 'when', textContent: String(list.length) })), el('div', {}, ...rows));
 }
 
-const VIEW = ['title', 'status', 'safe', 'why', 'done', 'research', 'decide', 'judgment', 'history', 'questions'];
+const VIEW = ['title', 'status', 'safe', 'why', 'done', 'research', 'decide', 'judgment', 'history', 'questions', 'reply'];
 // 질문 카드: 질문·추천·선택지·근거를 한자리에. 고른 답은 넘길 때까지 이 화면의 메모리에만 둔다
 const picked = {};
 // 저장 전 글과 고른 답은 이 브라우저에 임시로 둔다. 페이지를 다시 불러와도 되살린다
@@ -277,9 +307,13 @@ function questionCards(t, qs, onPick) {
     const rec = opts.find((o) => o.recommended);
     const btns = opts.map((o) => {
       const b = el('button', { type: 'button', className: 'opt', textContent: (o.recommended ? '★ ' : '') + o.label, onclick: () => {
-        (picked[t.id] = picked[t.id] || {})[q.q] = o.label;
+        // 고른 버튼을 다시 누르면 선택을 푼다
+        const mine = (picked[t.id] = picked[t.id] || {});
+        const off = mine[q.q] === o.label;
+        if (off) delete mine[q.q]; else mine[q.q] = o.label;
         other.value = '';
-        btns.forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+        grow(other);
+        btns.forEach((x) => x.setAttribute('aria-pressed', String(x === b && !off)));
         onPick();
       } });
       b.setAttribute('aria-pressed', String(pickOf(t, q) === o.label));
@@ -287,10 +321,10 @@ function questionCards(t, qs, onPick) {
     });
     // 선택지에 없는 답은 직접 적는다. 적으면 버튼 선택이 풀린다
     const cur = pickOf(t, q);
-    const other = el('input', { type: 'text', className: 'opt-input', placeholder: '직접 적기', value: cur && !opts.some((o) => o.label === cur) ? cur : '',
-      onkeydown: (e) => { if (e.key === 'Enter') e.preventDefault(); },
+    const other = el('textarea', { rows: 1, className: 'opt-input', placeholder: '선택지에 없으면 여기에 직접 적기', value: cur && !opts.some((o) => o.label === cur) ? cur : '',
       oninput: (e) => {
         e.stopPropagation();
+        grow(e.target);
         const mine = (picked[t.id] = picked[t.id] || {});
         if (e.target.value.trim()) mine[q.q] = e.target.value.trim(); else delete mine[q.q];
         btns.forEach((x) => x.setAttribute('aria-pressed', 'false'));
@@ -341,20 +375,49 @@ function renderEditor() {
   if (!t) { $('editor').replaceChildren(el('p', { className: 'empty', textContent: '왼쪽에서 티켓을 고르면 여기에 열려요.' })); return; }
   const note = el('span', { className: 'note', id: 'note' });
   // 상태는 고르지 않고 버튼으로 넘긴다. 버튼은 지금 칸 저장과 상태 변경을 한 번에 한다
-  const act = (label, next, cls = 'act') => el('button', { type: 'submit', className: cls, textContent: label, value: next });
-  const buttons = t.status === 'me' ? [act('AI에게 넘기기', 'ai', 'save'), act('저장', '', 'act'), act('완료', 'done')]
-    : t.status === 'done' ? [act('다시 열기', 'me', 'save')]
-    : [act('저장', '', 'save'), act('완료', 'done')];
+  const act = (label, next, cls = 'act', key = '') => el('button', { type: 'submit', className: cls, value: next }, label, key ? el('kbd', { textContent: key }) : null);
+  // 미루기: 정한 시각까지 목록에서 접어 두고, 예약이 T3 스레드도 같은 시각까지 미룬다
+  const snoozeBox = el('span', { className: 'snooze' });
+  const setSnooze = async (ms) => {
+    try { await db.collection('tickets').doc(t.id).update({ snoozeUntil: ms }); t.snoozeUntil = ms; paintSnooze(); const n = $('note'); if (n) n.textContent = ms ? `${wakeText(ms)}에 다시 내 차례로 와요.` : '다시 내 차례예요.'; }
+    catch (e) { const n = $('note'); if (n) n.textContent = '미루지 못했어요. 다시 눌러 주세요.'; }
+  };
+  const later = (min) => Date.now() + min * 60000;
+  const tomorrow9 = () => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d.getTime(); };
+  const sbtn = (label, fn) => el('button', { type: 'button', textContent: label, onclick: () => setSnooze(fn()) });
+  const paintSnooze = () => snoozeBox.replaceChildren(...(snoozed(t)
+    ? [`${wakeText(t.snoozeUntil)}까지 미룸`, sbtn('지금 깨우기', () => 0)]
+    : ['미루기', sbtn('30분', () => later(30)), sbtn('2시간', () => later(120)), sbtn('내일 9시', tomorrow9)]));
+  if (t.status === 'me') paintSnooze();
+  const buttons = t.status === 'me' ? [act('AI에게 넘기기', 'ai', 'save', '⌘↵'), act('저장', '', 'act', '⌘S'), act('완료', 'done')]
+    : t.status === 'done' ? [act('다시 열기', 'me', 'save', '⌘↵')]
+    : [act('저장', '', 'save', '⌘S'), act('내 차례로', 'me'), act('완료', 'done')];
   const safe = el('input', { type: 'checkbox', id: 'f-safe', checked: !!t.safe });
   const title = el('textarea', { id: 'f-title', value: t.title || '', rows: 1, maxLength: 200, placeholder: '제목 없음', onkeydown: (e) => { if (e.key === 'Enter') e.preventDefault(); } });
   title.setAttribute('aria-label', '제목');
+  // 이미지는 칸마다 붙여 넣는다. 고르는 즉시 저장해 글 저장과 따로 간다
+  const IMG_FIELDS = ['why', 'done', 'judgment'];
+  const holders = {};
+  const imgsOf = (k) => ((t.images || {})[k] || []);
+  const paint = (k) => holders[k].replaceChildren(imgsOf(k).length ? thumbs(imgsOf(k), assets ? (im) => removeImg(k, im) : null) : '');
+  const setImgs = async (k, list) => {
+    t.images = { ...(t.images || {}), [k]: list };
+    paint(k);
+    syncGo();
+    await db.collection('tickets').doc(t.id).update({ images: t.images });
+  };
+  const removeImg = async (k, im) => {
+    try { await setImgs(k, imgsOf(k).filter((x) => x.id !== im.id)); await assets.delete(im.id); } catch (e) { /* 저장본이 남아도 화면에서는 뺐다 */ }
+  };
   // Claude 가 쓰는 칸은 읽기 전용 — 사람은 고치지 않는다
   const areas = FIELDS.map(([k, name, who]) => {
     const head = el('span', {}, name, el('small', { className: who === 'Claude' ? 'chip ai' : 'chip', textContent: who }));
     if (who === 'Claude') return el('div', { className: 'field' }, head, t[k] ? el('div', { className: 'ai-text' }, ...mdBlocks(t[k])) : el('div', { className: 'ai-text none', textContent: '아직 없음' }));
-    return el('label', { className: 'field' }, head, el('textarea', { id: `f-${k}`, value: t[k] || '', rows: 1, placeholder: '비어 있음' }));
+    holders[k] = el('div');
+    return el('label', { className: 'field' }, head, el('textarea', { id: `f-${k}`, value: t[k] || '', rows: 1, placeholder: '비어 있음' }), holders[k]);
   });
   // 질문이 있으면 전부 답하거나 덧붙일 말을 적어야 넘길 수 있다
+  IMG_FIELDS.forEach(paint);
   picked[t.id] = picked[t.id] || draftOf(t.id).picks || {};
   const saveDraft = () => {
     const fields = {};
@@ -368,12 +431,12 @@ function renderEditor() {
     if (!qs.length) return;
     const done = qs.filter((q) => pickOf(t, q)).length;
     progress.textContent = `${qs.length}개 중 ${done}개 답함`;
-    if (t.status === 'me') buttons[0].disabled = done < qs.length && !(note2() && note2().value.trim());
+    if (t.status === 'me') buttons[0].disabled = done < qs.length && !((note2() && note2().value.trim()) || imgsOf('judgment').length);
   };
   const cards = qs.length ? questionCards(t, qs, () => { syncGo(); saveDraft(); }) : null;
   if (qs.length) {
     areas[1].firstChild.firstChild.nodeValue = '덧붙일 말';
-    areas[1].lastChild.placeholder = '다르게 하고 싶거나 더 말할 것이 있으면 적어 주세요';
+    areas[1].querySelector('textarea').placeholder ='다르게 하고 싶거나 더 말할 것이 있으면 적어 주세요';
   }
   let armed = false;
   const del = el('button', { type: 'button', className: 'del', textContent: '삭제', onclick: async () => {
@@ -381,6 +444,21 @@ function renderEditor() {
     try { await db.collection('tickets').doc(t.id).delete(); dirty = false; selected = null; renderEditor(); }
     catch (e) { note.textContent = '삭제하지 못했어요. 다시 눌러 주세요.'; }
   } });
+  // 칸 밖이나 다른 입력칸에서 붙여도 받는다. 어디에도 해당 없으면 「내 판단」으로 간다
+  pasteHandler = async (e) => {
+    const items = [...((e.clipboardData && e.clipboardData.items) || [])];
+    const files = items.filter((i) => i.kind === 'file' && i.type.startsWith('image/')).map((i) => i.getAsFile()).filter(Boolean);
+    if (!files.length) return;
+    e.preventDefault();
+    if (!assets) { note.textContent = '이 화면에서는 이미지를 저장할 수 없어요(assets 없음).'; return; }
+    const id = (e.target.id || '').replace('f-', '');
+    const k = IMG_FIELDS.includes(id) ? id : 'judgment';
+    note.textContent = '이미지를 올리는 중이에요.';
+    try {
+      for (const f of files) { const up = await assets.upload(f); await setImgs(k, [...imgsOf(k), { id: up.id }]); }
+      note.textContent = '이미지를 저장했어요.';
+    } catch (err) { note.textContent = `이미지를 올리지 못했어요(${(err && err.code) || (err && err.message) || '알 수 없음'}).`; }
+  };
   const form = el('form', { oninput: (e) => { dirty = true; note.textContent = '저장 전이에요.'; if (e.target.tagName === 'TEXTAREA') grow(e.target); syncGo(); saveDraft(); }, onsubmit: async (e) => {
     e.preventDefault();
     // 바뀐 칸만 쓴다 — 페이지를 열어 둔 사이 AI 가 적은 다른 칸을 덮지 않게
@@ -389,10 +467,17 @@ function renderEditor() {
     const body = {};
     for (const k of Object.keys(values)) if (values[k] !== (t[k] ?? (k === 'safe' ? false : ''))) body[k] = values[k];
     // 넘길 때 질문과 답을 한 쌍으로 쌓고 두 칸을 비운다 — 옛 판단이 새 판단으로 읽히지 않게
+    // AI 가 막혔을 때 사람이 되찾는다 — 집힌 표시를 비워 다시 넘기면 예약이 새로 집게 한다
+    if (values.status === 'me' && t.status === 'ai' && t.claimedAt) body.claimedAt = 0;
+    if (values.status === 'me' && t.status === 'ai' && Array.isArray(t.waiting) && t.waiting.length) body.waiting = [];   // 되찾으면 기다림도 끝낸다
+    if (values.status !== 'me' && t.snoozeUntil) body.snoozeUntil = 0;   // 넘기거나 닫으면 미룸은 풀린다
     const answer = qs.length ? composeAnswer(t, values.judgment) : values.judgment;
-    if (values.status === 'ai' && t.status !== 'ai' && answer.trim()) {
+    const answerImgs = imgsOf('judgment');
+    if (values.status === 'ai' && t.status !== 'ai' && (answer.trim() || answerImgs.length)) {
       const asked = [t.decide || '', questionsText(qs)].filter(Boolean).join('\n\n');
-      body.history = [...(Array.isArray(t.history) ? t.history : []), { decide: asked, judgment: answer, at: Date.now() }];
+      body.history = [...(Array.isArray(t.history) ? t.history : []), { decide: asked, judgment: answer, at: Date.now(), ...(answerImgs.length ? { images: answerImgs } : {}) }];
+      body.images = { ...(t.images || {}), judgment: [] };
+      body.reply = '';   // 이 답은 AI 가 해당 회차의 history 에도 적어 두었다
       body.decide = '';
       body.judgment = '';
       body.questions = [];
@@ -408,12 +493,17 @@ function renderEditor() {
   } },
     title,
     el('div', { className: 'props' }, el('span', {}, '상태 ', el('b', { textContent: t.status })), el('label', {}, safe, '구현해도 됨')),
-    el('section', { className: 'zone' }, el('h3', {}, '판단 ', progress), qs.length && !t.decide ? null : areas[0], cards, areas[1]),
+    t.decide ? el('div', { className: 'ai-text plain status-line' }, ...mdBlocks(t.decide)) : null,
+    // 백그라운드 일이 끝나야 완료다. 무엇을 언제까지 기다리는지 한 줄씩 보인다(진행률은 T3 스레드에서)
+    waits(t).length ? el('div', { className: 'ai-text plain status-line' }, ...waits(t).map((w) => el('p', { textContent: `돌고 있음: ${w.what}${w.eta ? ` (${wakeText(w.eta)} 예상)` : ''}` }))) : null,
+    t.reply || qs.length ? el('section', { className: 'zone' }, el('h3', {}, '판단 ', progress), t.reply ? el('div', { className: 'field' }, el('span', {}, 'AI의 답', el('small', { className: 'chip ai', textContent: 'Claude' })), el('div', { className: 'ai-text' }, ...mdBlocks(t.reply))) : null,
+      cards) : null,
     pastJudgments(t),
     el('section', { className: 'zone' }, el('h3', { textContent: '배경' }), el('div', { className: 'two' }, areas[2], areas[3])),
     el('details', { className: 'zone log', open: logOpen, ontoggle: (e) => { logOpen = e.target.open; } },
       el('summary', {}, '조사·구현 기록', el('small', { className: 'chip ai', textContent: 'Claude' })), researchBlocks(t, areas[4].lastChild)),
-    el('div', { className: 'actions' }, ...buttons, del, note));
+    // 어디를 읽다가도 바로 쓰고 넘기게 입력창과 버튼을 화면 아래에 붙인다
+    el('div', { className: 'composer' }, areas[1], el('div', { className: 'actions' }, ...buttons, t.status === 'me' ? snoozeBox : null, del, note)));
   $('editor').replaceChildren(form);
   let restored = false;
   for (const [k, v] of Object.entries(draftOf(t.id).fields || {})) {
@@ -423,11 +513,12 @@ function renderEditor() {
   if (restored) { dirty = true; note.textContent = '저장 안 한 글을 되살렸어요.'; }
   growAll();
   syncGo();
+  if (focusNext && $(focusNext)) { $(focusNext).focus(); focusNext = ''; }
 }
 
 function select(id) {
   if (id === selected) return;
-  if (dirty) { const n = $('note'); if (n) n.textContent = '저장하지 않은 내용이 있어요. 저장한 뒤 옮겨 주세요.'; return; }
+  dirty = false;   // 쓰던 글은 임시 저장에 있고 돌아오면 되살아난다
   selected = id; renderList(); renderEditor();
   if (matchMedia('(max-width:860px)').matches) $('editor').scrollIntoView();
 }
@@ -436,19 +527,41 @@ $('add').addEventListener('submit', async (e) => {
   e.preventDefault();
   const title = $('newTitle').value.trim();
   if (!title || !db) return;
-  if (dirty) { const n = $('note'); if (n) n.textContent = '저장하지 않은 내용이 있어요. 저장한 뒤 추가해 주세요.'; return; }
+  dirty = false;
   try {
     const ref = db.collection('tickets').doc();
-    await ref.set({ title, status: 'ai', safe: false, why: '', done: '', research: '', decide: '', judgment: '', createdAt: Date.now() });
-    $('newTitle').value = ''; selected = ref.id; renderList(); renderEditor();
+    selected = ref.id; focusNext = 'f-judgment';   // 저장 알림이 먼저 와서 그려질 수 있으니 저장 전에 정해 둔다
+    await ref.set({ title, status: 'me', safe: false, why: '', done: '', research: '', decide: '', judgment: '', createdAt: Date.now() });
+    $('newTitle').value = ''; renderList(); if (focusNext) renderEditor();
   } catch (err) { $('summary').textContent = '티켓을 추가하지 못했어요. 이 계정의 권한을 확인해 주세요.'; }
 });
 
 renderList(); renderEditor();
+addEventListener('paste', (e) => { if (pasteHandler) pasteHandler(e); });
+// 단축키: ⌘↵ 주 버튼 · ⌘S 저장 · ⌥↑↓ 티켓 이동
+addEventListener('keydown', (e) => {
+  const mod = e.metaKey || e.ctrlKey;
+  if (mod && (e.key === 'Enter' || e.key.toLowerCase() === 's')) {
+    const btns = [...document.querySelectorAll('.actions button[type=submit]')];
+    const b = e.key === 'Enter' ? btns.find((x) => x.classList.contains('save')) : btns.find((x) => x.value === '');
+    if (!b) return;
+    e.preventDefault();
+    if (!b.disabled) b.click();
+  } else if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    const rows = [...document.querySelectorAll('#groups .row')].filter((r) => r.offsetParent !== null);
+    const at = rows.findIndex((r) => r.getAttribute('aria-current') === 'true');
+    const next = rows[at + (e.key === 'ArrowUp' ? -1 : 1)];
+    e.preventDefault();
+    if (next) next.click();
+  }
+});
 (async () => {
   db = await claude.use('db');
+  claude.use('assets').then((a) => { assets = a; if (a && !dirty) renderEditor(); });
   if (!db) { $('summary').textContent = '이 화면에서는 티켓을 불러올 수 없어요. claude.ai 에 로그인한 뒤 열어 주세요.'; return; }
   const slow = setTimeout(() => { if (!loaded) $('summary').textContent = '티켓을 아직 불러오지 못했어요. 연결을 확인해 주세요.'; }, 10000);
+  // 미룬 시각이 지나면 목록을 다시 그려 내 차례로 돌려놓는다
+  setInterval(() => { if (tickets.some((t) => t.snoozeUntil)) renderList(); }, 30000);
   db.collection('tickets').onSnapshot((snap) => {
     tickets = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
     if (!snap.metadata.fromCache) { loaded = true; clearTimeout(slow); }

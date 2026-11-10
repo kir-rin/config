@@ -13,7 +13,7 @@ description: "레포마다 Claude Artifact 한 장을 정본으로 쓰는 티켓
 
 | 상태 | 뜻 | 바뀌는 때 |
 |---|---|---|
-| `ai` | 조사·구현이 남음 | 사람이 티켓을 쓰거나 판단을 적었을 때 |
+| `ai` | 조사·구현이 남음 | 사람이 [AI에게 넘기기]를 눌렀을 때. 새 티켓은 쓰는 중에 AI 가 가져가지 않게 `me` 로 시작한다 |
 | `me` | 판단·결과 확인이 필요함 | AI 가 질문·결과를 올렸을 때 |
 | `done` | 할 일 없음 | 사람이 닫을 때 |
 
@@ -28,7 +28,7 @@ description: "레포마다 Claude Artifact 한 장을 정본으로 쓰는 티켓
 1. `<이 스킬 디렉토리>/assets/inqueue.html` 을 스크래치패드로 복사하고 `__INQUEUE_TITLE__` 을 `<레포 이름> Inqueue` 로 바꾼다.
 2. 폰트를 받는다(레포에 2MB 를 넣지 않으려고 스킬에 두지 않았다). 받은 파일은 빈 폴더 하나에 둔다.
    `curl -fsSL -o <폴더>/PretendardVariable.woff2 https://cdn.jsdelivr.net/npm/pretendard@1.3.9/dist/web/variable/woff2/PretendardVariable.woff2`
-3. 발행한다: `Artifact` 에 `file_path`, `icon: "list"`, `capabilities: {"db": {}}`, `files: {"PretendardVariable.woff2": "<폴더>/PretendardVariable.woff2"}`.
+3. 발행한다: `Artifact` 에 `file_path`, `icon: "list"`, `capabilities: {"db": {}, "assets": {}}`, `files: {"PretendardVariable.woff2": "<폴더>/PretendardVariable.woff2"}`.
 4. `ArtifactData` 로 `tickets` 컬렉션에 예시 티켓 하나를 넣는다. 예시임을 적고, 업무 내용은 넣지 않는다. 칸: `title`, `status`, `safe`, `why`, `done`, `research`, `decide`, `judgment`, `questions`, `createdAt`.
 5. `ArtifactData list` 로 읽어 들어갔는지 본다.
 
@@ -36,9 +36,10 @@ description: "레포마다 Claude Artifact 한 장을 정본으로 쓰는 티켓
 
 ## 3. 예약 등록
 
-`references/schedule-prompt.md` 의 글에서 `__ARTIFACT_URL__`·`__REPO__` 를 채워 `schedule_task` 로 등록한다.
+`references/schedule-prompt.md` 의 글에서 맨 위에 적힌 자리표(`__REPO__`·`__ARTIFACT_URL__`·`__COPY_DIR__` 등)를 채워 `schedule_task` 로 등록한다. 스레드가 읽는 지시 본문은 `references/worker.md` 이고 메시지는 그 파일을 가리키기만 한다.
 
 - `schedule: {type:"interval", everyMs:900000}`(15분), `bindToCurrentThread:false`, `freshSession:true`
+- 첫 실행이 스레드를 만들면 그 스레드 모델을 Sonnet 으로 바꾼다(`t3_thread_configure`). 배분은 정해진 일이라 Opus 가 필요 없고, 실행이 두 배 가까이 빨라진다. 일하는 티켓 스레드는 그대로 둔다.
 - 등록은 **그 레포의 프로젝트에서** 한다(`projectId`). 다른 프로젝트 스레드는 찾지 못할 수 있다.
 - 등록 뒤 예시 티켓을 `ai` 로 바꾸고 `run_scheduled_task_now` 로 한 번 돌린다. 그 호출의 성공은 「시작됨」일 뿐이다. 티켓이 `me` 로 돌아오는 것까지 봐야 끝이다.
 
@@ -55,10 +56,15 @@ description: "레포마다 Claude Artifact 한 장을 정본으로 쓰는 티켓
 - **넘길 때 질문과 답을 `history` 에 쌓고 두 칸을 비운다.** 칸에 옛 판단이 남으면 `safe` 티켓이 그 판단으로 구현을 시작할 수 있고, 왜 그렇게 정했는지도 사라진다.
 - **구현 조건은 `questions` 로 본다.** `decide` 로 보면 진행 상황 한 줄 때문에 `safe` 를 켜고 넘겨도 구현하지 않고 한 바퀴를 버린다.
 - **push 는 티켓의 답으로 허락받는다.** 막아 두면 일반 대화로 옮겨 다시 해야 한다. 대신 질문에 나갈 커밋 전부와 자동 배포 여부를 쓰고, push 직전 다시 대조한다. `--force` 는 쓰지 않는다.
+- **사람의 말에 대한 답은 `reply` 로 판단 구역 맨 위에 보인다.** 조사 기록에 넣으면 접혀서, 읽고 답했는데도 무시한 것처럼 보인다.
+- **키 금지는 「값을 보지 않는다」 이다.** 「키 읽기 금지」로 쓰면 스레드가 키를 스스로 읽는 레포 스크립트(verify-chat)까지 거부해 두 회차를 버렸다. 값을 열어 보기·출력·기록만 막고, 사람 칸이 시킨 실행은 한다.
+- **티켓을 `me` 로 돌리는 길이 스레드의 마지막 쓰기 하나뿐이면 끊길 때 갇힌다.** 네트워크가 끊겨 결과가 스레드에만 남고 티켓은 1시간 `ai` 로 묶였다. 그래서 백그라운드에 맡기면 `ai` 에 두고 `waiting`(무엇·예상 시각)을 쓴다(처음엔 바로 `me` 로 돌렸더니 할 일 없는 티켓이 끝난 것처럼 보였다). 예약은 예상 시각+15분까지 기다린 뒤 되돌린다. 또 쓰기가 실패하면 한 번만 다시 불러 보고 기다리지 않고 답 맨 앞에 「티켓 못 씀」을 쓰고, 기다림은 1분마다 새로 뜨는 예약이 맡아 10분 넘게 쉬는 스레드의 마지막 답을 티켓에 옮긴다.
+- **스레드가 티켓 도구 없이도 일하게 한다.** 끊긴 세션에선 다시 보내도 같은 데서 멈췄다. 예약이 작업 지시 끝에 「티켓 요약」(이번 판단·질문·safe)을 붙이고, 스레드는 결과를 「티켓 기록」 JSON 으로 남기면 예약이 대신 쓴다. 티켓 도구가 꼭 있어야 하는 곳은 1분마다 새로 뜨는 예약 하나뿐이다.
+- **긴 지시를 메시지로 보내지 않는다.** 예약이 4천 자 지시를 스레드마다 새로 써서 배분 한 번에 3분이 걸렸고 실행이 줄 섰다. 본문은 `worker.md`, 티켓 사본은 list 의 out_dir 파일로 넘기고 메시지는 몇 줄만.
 - **`claimedAt` 없으면 다음 예약이 같은 티켓을 또 집는다.** `if_version` 으로 집고, 1시간 지나면 만료. 세션이 죽어도 티켓이 복구된다.
 - **Claude 칸은 읽기 전용이다.** 입력칸으로 두면 사람이 쓸 일도 없는데 혼란만 준다.
 - **시간대 제한을 넣지 않는다.** 빈 실행도 세션은 똑같이 떠서 아낄 게 없고, 첫 실행 확인만 막는다.
-- **티켓에 비밀번호·키를 적지 않는다.** claude.ai 저장소에 남고 넘기는 스레드로도 간다. 사용자가 적었으면 지우라고 알린다.
+- **티켓에 비밀번호·키를 적지 않는다.** claude.ai 저장소에 남고 넘기는 스레드로도 간다. 적혀 있어도 AI 는 입력하지 않는다(`company-browser` 규칙). 사람이 창에서 한 번 로그인하고 저장 세션을 다시 쓴다. 사용자가 적었으면 지우라고 알린다.
 - **Artifact 는 외부 스타일시트를 Google Fonts 에서만 받는다.** Pretendard 는 CDN 스타일시트로 못 올리니 `files` 로 같이 발행한다. 스크립트는 cdnjs 가 된다(marked·DOMPurify).
 - **마크다운을 손으로 짜지 않는다.** 번호 목록·표가 빠져 결국 라이브러리로 바꿨다. 경로 자동 코드 표시만 페이지 코드다.
 - 페이지가 잘 그려지는지는 AI 가 볼 수 없는 경우가 많다. 렌더링을 봤다고 말하지 말고 사용자에게 봐 달라고 한다.
