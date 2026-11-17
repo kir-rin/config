@@ -1,0 +1,4 @@
+interface:
+  display_name: "explorbot-fake-world"
+  short_description: "가짜 세계 페이지에 Explorbot 을 붙여 탐색·회귀 시험"
+  default_prompt: "$explorbot-fake-world 를 사용해 가짜 데이터로 이 화면을 탐색해 줘"

@@ -1,0 +1,4 @@
+interface:
+  display_name: "artifact-db-code"
+  short_description: "Artifact 를 껍데기 + DB 코드로 나눠 재게시 없이 고친다"
+  default_prompt: "$artifact-db-code 를 사용해 이 Artifact 를 껍데기와 DB 코드로 나누고 새 코드를 올려 줘"

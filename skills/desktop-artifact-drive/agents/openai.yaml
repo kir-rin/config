@@ -1,0 +1,4 @@
+interface:
+  display_name: "desktop-artifact-drive"
+  short_description: "실제 Claude Desktop 안 Artifact 를 읽기 전용으로 눌러 보고 보고한다"
+  default_prompt: "$desktop-artifact-drive 를 사용해 Desktop 의 이 Artifact 를 읽기 전용으로 훑어 줘"
