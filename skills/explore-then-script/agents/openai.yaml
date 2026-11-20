@@ -1,0 +1,4 @@
+interface:
+  display_name: "explore-then-script"
+  short_description: "화면을 눌러 보며 버그·UI/UX 문제를 모으고 흐름을 고정 대본으로 굳힌다"
+  default_prompt: "$explore-then-script 를 사용해 이 화면을 눌러 보며 버그와 UI/UX 문제를 찾아 줘"
